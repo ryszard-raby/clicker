@@ -64,10 +64,10 @@ const runner = Clickator.create({
 
 await runner.start({
   goal: 'Rozwiąż wszystkie pytania quizu i sprawdź odpowiedzi.',
-  mode: 'manual', // albo 'yolo'
+  mode: 'yolo', // domyślnie; albo 'manual'
   maxSteps: 40,
   maxMinutes: 5,
-  confidence: 0.7,
+  confidence: 0.2,
   settleMs: 650,
   success: { type: 'text', value: 'Wynik: 10/10' },
 });
@@ -81,7 +81,28 @@ await runner.start({
 
 ## Jak działa podejmowanie decyzji
 
+### Text generation: direct OpenAI API
+
+JEV continues to use DefAPI. Text input generation uses **gpt-5.6-luna** directly through **https://api.openai.com/v1/chat/completions**, with a separate OpenAI key. See the [official model documentation](https://developers.openai.com/api/docs/models/gpt-5.6-luna) and [Structured Outputs](https://developers.openai.com/api/docs/guides/structured-outputs).
+
+Configure both keys in .env, then rebuild:
+
+```dotenv
+DEFAPI_API_KEY=your_defapi_key
+OPENAI_API_KEY=your_openai_key
+```
+
+Run `npm run build` and update the userscript. The Tampermonkey wrapper needs both `@connect api.defapi.org` and `@connect api.openai.com`. Both keys are embedded in the private bundle. The panel also accepts an OpenAI key in memory; the programmatic alternatives are `openaiApiKey` or `getOpenAIKey`. A missing OpenAI key stops text generation; the DefAPI key is never used as a fallback.
+
+Luna receives only the goal, field label (up to 160 characters), and maximum length. The response uses a strict JSON schema with a string-or-null value and `store: false`. Refusals, incomplete responses, invalid JSON, and invalid values stop execution. Filling and submitting remain separate JEV actions; manual mode requires approval of the exact generated value. Logging, Stop, and stale-DOM checks still apply.
+
+Custom transports receive the selected provider's key in `apiKey`. Route model `gpt-5.6-luna` with its `messages` and `response_format` to OpenAI, and JEV to DefAPI. Both request bodies are sent unchanged. Local tests cover routing, credentials, parsing, and the fill/search flow; live OpenAI verification requires OPENAI_API_KEY.
+
 ### Logi requestów i odpowiedzi JEV
+
+Konsola przeglądarki pokazuje `[Clickator build]` z datą buildu i modelem tekstowym oraz `[Clickator API]` dla żądań, odpowiedzi HTTP, sparsowanych odpowiedzi i błędów. Wpisy zawierają identyfikator sesji i requestu, etap, model, endpoint, rozmiar body, czas, status HTTP oraz dostępne identyfikatory odpowiedzi serwera. Body i odpowiedzi mogą zawierać dane strony; nagłówki autoryzacji nie są logowane, a wartość używanego klucza jest maskowana. Wyłączenie: `Clickator.mount({ debug: false })` (nie wyłącza informacji o buildzie). Własny transport może przekazać status przez `onHttp({status, response, requestId})` w drugim argumencie.
+
+Jeśli log requestu wskazuje Lunę, a `[Clickator build]` nie wskazuje Luna, sprawdź ładowaną kopię `@require` i zapisz ponownie userscript w Tampermonkey po przebudowaniu pliku. Włącz „Preserve log” w DevTools, aby zachować wpisy podczas nawigacji.
 
 W panelu kliknij **Wybierz folder logów** i zaakceptuj dostęp do zapisu. Skrypt utworzy w wybranym miejscu podfolder `clickator-logs`. Dopóki nie wybierzesz folderu, zapis jest wyłączony.
 
@@ -113,7 +134,7 @@ Tryb **manualny** bez pytania zmienia checkboxy (także odznacza), radio i role 
 
 ### Niska pewność decyzji
 
-Domyślny próg wynosi 70%, dlatego odpowiedź z pewnością 60% nie kwalifikuje się do automatycznego wykonania. W panelu pole „Minimalna pewność decyzji (%)” pozwala ustawić np. 60 — decyzja równa progowi jest akceptowana. Zmiana obowiązuje po kliknięciu Start; Wznów używa konfiguracji zapisanej sesji. W API odpowiada temu `runner.start({ goal: '...', confidence: 0.6 })`.
+Domyślny tryb to YOLO, a próg pewności wynosi 20%. W panelu pole „Minimalna pewność decyzji (%)” pozwala zmienić próg — decyzja równa progowi jest akceptowana. Zmiana obowiązuje po kliknięciu Start; Wznów używa konfiguracji zapisanej sesji. W API domyślnej wartości odpowiada `runner.start({ goal: '...', confidence: 0.2 })`.
 
 Niższy próg dopuszcza mniej pewne wybory. Zamiast obniżać go dla wszystkich działań, możesz użyć trybu manualnego i zatwierdzać pojedyncze niepewne akcje. Ta zgoda nie obniża progu następnych decyzji ani nie omija sprawdzania aktualności DOM. Niepewne `done`/`blocked` nadal zatrzymuje sesję; próg oceny osiągnięcia celu `successThreshold` pozostaje osobnym ustawieniem. Wynik pewności modelu nie jest gwarancją poprawności akcji.
 
@@ -133,14 +154,17 @@ Inne zakończenia nie oznaczają sukcesu: limit kroków/czasu, niska pewność, 
 
 ## Zakres MVP
 
+Dropdowny: natywne `select` oferują konkretne opcje (także zaznaczanie/odznaczanie w `multiple`). Niestandardowe kontrolki z `role=combobox` lub `aria-haspopup=listbox/menu/true` oferują otwarcie/zamknięcie, a po ponownym skanie JEV wybiera widoczną opcję `role=option` lub `menuitem*`. `aria-controls` / `aria-owns` łączy listę renderowaną poza kontrolką z jej etykietą, np. „Rozmiar”. Opcje ukryte i wyłączone są pomijane. W trybie manualnym otwarcie i wybór wymagają zgody. Dowolne dropdowny z samych divów bez ról ARIA, listy wirtualizowane i wyszukiwanie tekstowe wewnątrz comboboxa mogą wymagać adaptera konkretnej strony.
+
 - Standardowy DOM głównego dokumentu; brak obsługi iframe, shadow DOM stron, canvas, drag-and-drop i zdarzeń wymagających `isTrusted`.
-- Nie generuje tekstu do inputów/textarea i nie obsługuje uploadu. JEV wybiera spośród podanych opcji; wolny tekst wymagałby osobnego mechanizmu.
+- Generuje tekst dla pól text/search przez Lunę. Nie obsługuje textarea, contenteditable, pól password/email/number ani uploadu; pola readonly są pomijane.
 - Skan obejmuje do 160 kontrolek i 240 akcji na komponent; lokalnie zbierany tekst strony do 10 000 znaków, grupy do 1600. Do JEV trafiają ograniczone widoki opisane powyżej. Duże formularze mogą wymagać zawężenia skanowania. Panel sygnalizuje skrócenie listy. Warunek tekstowy dotyczy lokalnie zebranego fragmentu tekstu; dla długich stron użyj selektora.
 - Okres oczekiwania po akcji jest konfigurowalny; wolno aktualizujące się aplikacje mogą wymagać większego `settleMs`. Stale zmieniający się tekst może uniemożliwić wykonanie decyzji.
 - Linki otwierane są w tej samej karcie; popupów otwieranych kodem strony nie przejmuje. Pełna nawigacja wymaga uruchomienia wrappera także na stronie docelowej. Bez niego kontynuacja nie nastąpi.
-- Tekst strony i opis kontrolek trafiają do DefAPI. Hasła, pliki i wartości pól tekstowych nie są pobierane, lecz widoczny tekst może zawierać dane osobowe. Tekst strony jest oznaczany jako niezaufany, ale prompt nie gwarantuje odporności na prompt injection. Nie przekazuj klucza do kontekstu JS strony; preferuj sandbox Tampermonkey.
+- Tekst strony, opisy kontrolek i wartości obsługiwanych pól text/search trafiają do DefAPI i włączonych logów. Hasła oraz pliki nie są pobierane. Tekst strony jest oznaczany jako niezaufany, ale prompt nie gwarantuje odporności na prompt injection. Nie przekazuj klucza do kontekstu JS strony; preferuj sandbox Tampermonkey.
 - Nie wykonano wywołania płatnego JEV ani testu integracyjnego w Tampermonkey — potrzebny jest klucz i docelowa strona. Schemat API zweryfikowano w dokumentacji, wykonanie i scenariusze zatrzymania sprawdzono lokalnymi testami.
 
 ### Automatyczne przejście z kategorii do koszyka
 
 Wrapper Tampermonkey musi uruchamiać `Clickator.mount()` na każdej stronie zadania (`@match` obejmujący kategorię, produkt i koszyk; `@run-at document-idle`). Klucz z buildu lub `getApiKey` musi być dostępny po przeładowaniu. W trybie YOLO zadanie np. „Znajdź Samsung S26 i dodaj go do koszyka” kontynuuje się po nawigacji z tą samą historią i pozostałym budżetem kroków/czasu. Tryb manualny wznawia analizę, ale nadal wymaga potwierdzenia kliknięć. Samo dodanie do koszyka nie oznacza złożenia zamówienia.
+

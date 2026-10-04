@@ -22,7 +22,7 @@ function memory() {
 function answer(choice, noul = 0.01, confidence = 0.99) {
   return { answers: { next: { type: 'choice', choice, confidence }, achieved: { type: 'noul', noul } } };
 }
-const config = { goal: 'Wypełnij quiz', settleMs: 100 };
+const config = { goal: 'Wypełnij quiz', settleMs: 100, mode: 'manual', confidence: 0.7 };
 
 // Existing action-level scenarios automatically select their first component.
 class Runner extends ActualRunner {

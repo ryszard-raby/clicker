@@ -115,7 +115,7 @@ test('uncertain component selection requires consent even for a confident checkb
   const document = doc('<label><input type="checkbox">Red</label>');
   let approvals = 0;
   const runner = new Runner({ document, store: store(), transport: async body => answer(body.state.stage === 'component' ? 'g0' : 'a0', body.state.stage === 'component' ? 0.4 : 1), confirm: async action => { approvals++; assert.equal(action.confidence, 0.4); return false; } });
-  await runner.start({ goal: 'Test' });
+  await runner.start({ goal: 'Test', mode: 'manual', confidence: 0.7 });
   assert.equal(approvals, 1);
   assert.equal(document.querySelector('input').checked, false);
 });

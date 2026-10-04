@@ -1,4 +1,4 @@
-import { validateConfig, requestBody, componentSummaries, parseDecision, fetchTransport, fingerprint, localSuccess } from './core.js';
+import { validateConfig, requestBody, componentSummaries, parseDecision, fetchTransport, fingerprint, localSuccess, textRequest, parseText, endpointFor, payloadFor, TEXT_MODEL } from './core.js';
 import { scan, execute } from './dom.js';
 
 const STORE_KEY = 'clickator.session.v1';
@@ -15,10 +15,13 @@ export class Runner {
     this.doc = options.document || document;
     this.transport = options.transport || fetchTransport;
     this.logger = options.logger || null;
+    this.debug = options.debug !== false;
+    this.console = options.console || this.doc.defaultView.console;
     this.getApiKey = options.getApiKey || (() => options.apiKey || '');
+    this.getOpenAIKey = options.getOpenAIKey || (() => options.openaiApiKey || '');
     this.store = options.store || sessionStore(this.doc);
     this.onStatus = options.onStatus || (() => {});
-    this.confirm = options.confirm || (async action => this.doc.defaultView.confirm(`Clickator: ${action.label}\n${action.optionLabel || action.href || action.kind}\n${action.context || ''}\nPewność: ${Math.round(action.confidence * 100)}% (próg ${Math.round(action.threshold * 100)}%)\nZezwolić na akcję?`));
+    this.confirm = options.confirm || (async action => this.doc.defaultView.confirm(`Clickator: ${action.label}\n${action.kind === 'fill' ? 'Wpisz: ' + action.value : action.optionLabel || action.href || action.kind}\n${action.context || ''}\nPewność: ${Math.round(action.confidence * 100)}% (próg ${Math.round(action.threshold * 100)}%)\nZezwolić na akcję?`));
     this.running = false;
     this.pending = null;
     this.state = null;
@@ -51,9 +54,22 @@ export class Runner {
     return this.run();
   }
   async decide(snapshot, componentId = null) {
-    const id = this.state.requestId = (this.state.requestId || 0) + 1;
     const body = requestBody(this.state.config.goal, snapshot, this.state.history, componentId);
     const stage = componentId === null ? 'wybór komponentu' : 'wybór akcji';
+    return this.send(body, stage);
+  }
+  async send(body, stage) {
+    const id = this.state.requestId = (this.state.requestId || 0) + 1;
+    let secret = '';
+    let http;
+    const started = Date.now();
+    const diagnostic = (event, details) => {
+      if (!this.debug) return;
+      // Store snapshots, never credential headers or live objects.
+      let serialized = JSON.stringify({ event, session: this.state.startedAt, id, model: body.model, endpoint: endpointFor(body), stage, elapsedMs: Date.now() - started, ...details });
+      if (secret) serialized = serialized.split(JSON.stringify(secret).slice(1, -1)).join('[REDACTED]');
+      this.console.info('[Clickator API]', JSON.parse(serialized));
+    };
     const log = async (kind, value) => {
       if (this.logger) await this.logger.write(`${kind}-${id}.json`, value);
     };
@@ -68,7 +84,9 @@ export class Runner {
     if (!this.running) { await this.store.clear(); return; }
     const timeout = setTimeout(() => this.controller.abort(), 30000);
     try {
-      const apiKey = await this.getApiKey();
+      const apiKey = body.model === TEXT_MODEL ? await this.getOpenAIKey() : await this.getApiKey();
+      secret = apiKey;
+      if (body.model === TEXT_MODEL && !apiKey) throw new Error('Podaj OPENAI_API_KEY w .env lub klucz OpenAI w panelu.');
       if (this.transport === fetchTransport && !apiKey) throw new Error('Podaj klucz API.');
       // Race also protects against transports that ignore AbortSignal.
       const signal = this.controller.signal;
@@ -76,13 +94,17 @@ export class Runner {
       let abort;
       const aborted = new Promise((_, reject) => { abort = () => reject(new Error('Przerwano żądanie lub przekroczono czas.')); signal.addEventListener('abort', abort, { once: true }); });
       try {
-        this.emit(`Czekam na odpowiedź JEV · ${stage} · żądanie ${id} (limit 30 s)`);
-        const result = await Promise.race([this.transport(body, { apiKey, signal }), aborted]);
-        if (this.logger && this.running) this.emit(`Zapisuję odpowiedź JEV · żądanie ${id}`);
+        this.emit(`Czekam na odpowiedź ${body.model === TEXT_MODEL ? 'Luna' : 'JEV'} · ${stage} · żądanie ${id} (limit 30 s)`);
+        const payload = payloadFor(body);
+        diagnostic('request', { bytes: new TextEncoder().encode(JSON.stringify(payload)).length, payload });
+        const result = await Promise.race([this.transport(body, { apiKey, signal, onHttp: info => { http = info; diagnostic('http', info); } }), aborted]);
+        diagnostic('response', { status: http?.status, response: result });
+        if (this.logger && this.running) this.emit(`Zapisuję odpowiedź ${body.model === TEXT_MODEL ? 'Luna' : 'JEV'} · żądanie ${id}`);
         await log('response', result);
         return result;
       } finally { signal.removeEventListener('abort', abort); }
     } catch (error) {
+      diagnostic('error', { status: http?.status, message: error.message, response: error.response });
       await log('response', { status: 'error', message: error.message, ...(error.response !== undefined ? { response: error.response } : {}) });
       throw error;
     } finally { clearTimeout(timeout); }
@@ -160,6 +182,18 @@ export class Runner {
         state.successVotes = 0;
         const ref = fresh.refs.get(decision.choice);
         const action = ref.action;
+        if (action.kind === 'fill') {
+          const generated = await this.send(textRequest(config.goal, page, action), 'generowanie wartości pola');
+          if (!this.running) return;
+          const check = scan(this.doc);
+          if (fingerprint(check.publicState) !== before || check.refs.get(action.id)?.el !== ref.el) {
+            state.textStale = (state.textStale || 0) + 1;
+            if (state.textStale >= 5) return await this.stop('Pole zmieniło się podczas generowania tekstu.');
+            continue;
+          }
+          state.textStale = 0;
+          action.value = parseText(generated, action);
+        }
         const signature = JSON.stringify([before, action]);
         if (state.seen.filter(x => x === signature).length >= 2) return await this.stop('Wykryto pętlę: powtarzana akcja w tym samym stanie strony.');
         if (config.mode === 'manual' && (needsConfidenceApproval || !['checkbox', 'radio'].includes(action.kind))) {
@@ -182,8 +216,8 @@ export class Runner {
         if (!this.running) { await this.store.clear(); return; }
         this.emit(`Wykonuję: ${action.label}${action.optionLabel ? ' → ' + action.optionLabel : ''}`);
         execute(ref);
-        this.emit(`Wysłano akcję: ${action.label} · czekam na zmianę strony`);
-        await this.delay();
+        this.emit(action.kind === 'fill' ? `Wpisano tekst: ${action.label} · czekam na sugestie autocomplete` : `Wysłano akcję: ${action.label} · czekam na zmianę strony`);
+        await this.delay(action.kind === 'fill' ? Math.max(config.settleMs, config.autocompleteMs) : config.settleMs);
         if (!this.running) return;
         const after = fingerprint(scan(this.doc).publicState);
         state.unchanged = before === after ? state.unchanged + 1 : 0;
@@ -197,11 +231,11 @@ export class Runner {
       this.busy = false;
     }
   }
-  delay() {
+  delay(duration = this.state.config.settleMs) {
     const signal = this.controller.signal;
     return new Promise(resolve => {
       const finish = () => { clearTimeout(timer); signal.removeEventListener('abort', finish); resolve(); };
-      const timer = setTimeout(finish, this.state.config.settleMs);
+      const timer = setTimeout(finish, duration);
       signal.addEventListener('abort', finish, { once: true });
       if (signal.aborted) finish();
     });

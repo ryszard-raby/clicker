@@ -13,13 +13,17 @@ test('build loads .env, honors environment and runtime overrides, and works with
   await cp(new URL('../build.mjs', import.meta.url), join(root, 'build.mjs'));
   const env = { ...process.env };
   delete env.DEFAPI_API_KEY;
-  async function build(expected, variables = env) {
+  delete env.OPENAI_API_KEY;
+  async function build(expected, variables = env, expectedOpenAI = '') {
     const output = execFileSync(process.execPath, ['build.mjs'], { cwd: root, env: variables, encoding: 'utf8' });
     if (expected) assert.ok(!output.includes(expected), 'Build must not log the key');
+    if (expectedOpenAI) assert.ok(!output.includes(expectedOpenAI));
     const dom = new JSDOM('<p>Test</p>', { url: 'https://example.org', runScripts: 'outside-only' });
     dom.window.eval(await readFile(join(root, 'dist/clickator.js'), 'utf8'));
     const api = dom.window.Clickator;
     assert.equal(await api.create().getApiKey(), expected);
+    assert.equal(await api.create().getOpenAIKey(), expectedOpenAI);
+    assert.equal(await api.create({ openaiApiKey: 'override-openai' }).getOpenAIKey(), 'override-openai');
     assert.equal(await api.create({ apiKey: 'runtime-key' }).getApiKey(), 'runtime-key');
     assert.equal(await api.create({ getApiKey: () => 'provider-key' }).getApiKey(), 'provider-key');
     const runner = api.mount();
@@ -34,4 +38,7 @@ test('build loads .env, honors environment and runtime overrides, and works with
   assert.ok(!(await readFile(join(root, 'dist/clickator.js'), 'utf8')).includes('not-for-browser'));
   await build('environment-key', { ...env, DEFAPI_API_KEY: 'environment-key' });
   await build('', { ...env, DEFAPI_API_KEY: '' });
+  await writeFile(join(root, '.env'), 'DEFAPI_API_KEY=defapi-test\nOPENAI_API_KEY=openai-test\n');
+  await build('defapi-test', env, 'openai-test');
+  await build('defapi-test', { ...env, OPENAI_API_KEY: 'openai-env' }, 'openai-env');
 });
