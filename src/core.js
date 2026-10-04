@@ -1,5 +1,5 @@
-export const ENDPOINT = 'https://api.defapi.org/api/v1/decisions';
-export const MODEL = 'typesafe/jev-1.13';
+export const ENDPOINT = 'https://api.typesafe.ai/v1/systemone';
+export const MODEL = 'jev-1.13.0';
 export const TEXT_MODEL = 'gpt-5.6-luna';
 export const CHAT_ENDPOINT = 'https://api.openai.com/v1/chat/completions';
 export const payloadFor = body => body;

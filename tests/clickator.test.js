@@ -75,7 +75,7 @@ test('select generates typed choices and dispatches change', () => {
 test('API request follows documented choice/noul schema; rejects unknown IDs and missing confidence', () => {
   const snapshot = scan(page('<button>Go</button>').window.document).publicState;
   const body = requestBody('go', snapshot, []);
-  assert.equal(body.model, 'typesafe/jev-1.13');
+  assert.equal(body.model, 'jev-1.13.0');
   assert.equal(body.questions.next.type, 'choice');
   assert.equal(body.questions.achieved.type, 'noul');
   assert.throws(() => parseDecision(answer('alien'), snapshot.actions));
@@ -191,7 +191,7 @@ test('Stop also cancels an unanswered consent request', async () => {
 
 test('GM adapter sends documented authenticated request and propagates HTTP failures', async () => {
   const transport = gmTransport(options => {
-    assert.equal(options.url, 'https://api.defapi.org/api/v1/decisions');
+    assert.equal(options.url, 'https://api.typesafe.ai/v1/systemone');
     assert.equal(options.headers.Authorization, 'Bearer test');
     queueMicrotask(() => options.onload({ status: 200, responseText: JSON.stringify(answer('done', 1)) }));
     return { abort() {} };

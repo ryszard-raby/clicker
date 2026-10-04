@@ -12,7 +12,7 @@ test('build loads .env, honors environment and runtime overrides, and works with
   await cp(new URL('../src', import.meta.url), join(root, 'src'), { recursive: true });
   await cp(new URL('../build.mjs', import.meta.url), join(root, 'build.mjs'));
   const env = { ...process.env };
-  delete env.DEFAPI_API_KEY;
+  delete env.TYPESAFE_API_KEY;
   delete env.OPENAI_API_KEY;
   async function build(expected, variables = env, expectedOpenAI = '') {
     const output = execFileSync(process.execPath, ['build.mjs'], { cwd: root, env: variables, encoding: 'utf8' });
@@ -31,14 +31,17 @@ test('build loads .env, honors environment and runtime overrides, and works with
     dom.window.close();
   }
   await build('');
+  // A legacy provider key must never be sent to TypeSafe.
+  await writeFile(join(root, '.env'), 'DEFAPI_API_KEY=legacy-provider-key\n');
+  await build('', { ...env, DEFAPI_API_KEY: 'legacy-environment-key' });
   // Quotes, backslashes, backticks and interpolation must remain literal data.
   const dummy = 'test-"quoted"-\\-`-${literal}-#';
-  await writeFile(join(root, '.env'), `DEFAPI_API_KEY='${dummy}'\nOTHER_SECRET=not-for-browser\n`);
+  await writeFile(join(root, '.env'), `TYPESAFE_API_KEY='${dummy}'\nOTHER_SECRET=not-for-browser\n`);
   await build(dummy);
   assert.ok(!(await readFile(join(root, 'dist/clickator.js'), 'utf8')).includes('not-for-browser'));
-  await build('environment-key', { ...env, DEFAPI_API_KEY: 'environment-key' });
-  await build('', { ...env, DEFAPI_API_KEY: '' });
-  await writeFile(join(root, '.env'), 'DEFAPI_API_KEY=defapi-test\nOPENAI_API_KEY=openai-test\n');
-  await build('defapi-test', env, 'openai-test');
-  await build('defapi-test', { ...env, OPENAI_API_KEY: 'openai-env' }, 'openai-env');
+  await build('environment-key', { ...env, TYPESAFE_API_KEY: 'environment-key' });
+  await build('', { ...env, TYPESAFE_API_KEY: '' });
+  await writeFile(join(root, '.env'), 'TYPESAFE_API_KEY=typesafe-test\nOPENAI_API_KEY=openai-test\n');
+  await build('typesafe-test', env, 'openai-test');
+  await build('typesafe-test', { ...env, OPENAI_API_KEY: 'openai-env' }, 'openai-env');
 });

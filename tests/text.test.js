@@ -74,10 +74,10 @@ test('text parser rejects refusal, malformed, truncated and oversized output', (
   }
 });
 
-test('missing OpenAI key stops before transport and never reuses the DefAPI key', async () => {
+test('missing OpenAI key stops before transport and never reuses the TypeSafe key', async () => {
   const document = setup();
   let called = false;
-  const runner = new Runner({ document, store, apiKey: 'defapi-only', debug: false, transport: async body => {
+  const runner = new Runner({ document, store, apiKey: 'typesafe-only', debug: false, transport: async body => {
     if (body.model === TEXT_MODEL) { called = true; throw new Error('Should not send'); }
     return decision(body.state.stage === 'component' ? 'g0' : 'a0');
   } });

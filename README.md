@@ -1,6 +1,6 @@
 # Clickator
 
-Biblioteka przeglądarkowa sterowana promptem, z modelem `typesafe/jev-1.13`. Wynik budowania: **`dist/clickator.js`**, pojedynczy skrypt IIFE bez zależności runtime. Nie tworzy rozszerzenia ani wrappera userscript — można załadować go przez Tampermonkey `@require` i wywołać `Clickator.mount(...)` w tym samym kontekście.
+Biblioteka przeglądarkowa sterowana promptem, z modelem `jev-1.13.0`. Wynik budowania: **`dist/clickator.js`**, pojedynczy skrypt IIFE bez zależności runtime. Nie tworzy rozszerzenia ani wrappera userscript — można załadować go przez Tampermonkey `@require` i wywołać `Clickator.mount(...)` w tym samym kontekście.
 
 ## Budowanie i testy
 
@@ -21,10 +21,12 @@ npm test
 Skopiuj `.env.example` do `.env` w katalogu projektu i uzupełnij:
 
 ```dotenv
-DEFAPI_API_KEY=twoj_klucz_defapi
+TYPESAFE_API_KEY=twoj_klucz_typesafe
 ```
 
-Następnie uruchom `npm run build`. `Clickator.mount()` i `Clickator.create()` automatycznie użyją tego klucza; nie trzeba wpisywać go w panelu. Po każdej zmianie `.env` przebuduj skrypt i zaktualizuj kopię ładowaną przez Tampermonkey. Zmienna środowiskowa `DEFAPI_API_KEY` ma pierwszeństwo przed `.env`. Opcje `apiKey` i `getApiKey` przekazane podczas uruchamiania mają pierwszeństwo przed kluczem z buildu. Bez klucza build nadal działa i można podać go w panelu.
+Po migracji z DefAPI podaj nowy klucz z [konsoli TypeSafe](https://console.typesafe.ai). Stara zmienna `DEFAPI_API_KEY` nie jest odczytywana; nie wystarczy zmienić jej nazwy i zachować poprzedni klucz. Zaktualizuj także nagłówek wrappera Tampermonkey na `@connect api.typesafe.ai`.
+
+Następnie uruchom `npm run build`. `Clickator.mount()` i `Clickator.create()` automatycznie użyją tego klucza; nie trzeba wpisywać go w panelu. Po każdej zmianie `.env` przebuduj skrypt i zaktualizuj kopię ładowaną przez Tampermonkey. Zmienna środowiskowa `TYPESAFE_API_KEY` ma pierwszeństwo przed `.env`. Opcje `apiKey` i `getApiKey` przekazane podczas uruchamiania mają pierwszeństwo przed kluczem z buildu. Bez klucza build nadal działa i można podać go w panelu.
 
 Przeglądarka nie czyta lokalnego `.env`: build **osadza klucz w wynikowym JS**. `.env` i `dist/` są ignorowane przez Git; nie publikuj bundla z kluczem ani nie udostępniaj go przez publiczny URL. Ignorowanie nie usuwa plików już śledzonych przez Git.
 
@@ -34,11 +36,11 @@ Po załadowaniu bundla:
 const runner = Clickator.mount();
 ```
 
-Panel pozwala podać prompt, klucz DefAPI, tryb, limit czasu/kroków i warunek sukcesu. Klucz wpisany w panelu pozostaje w pamięci bieżącej strony. Domyślny transport to `fetch`; jeżeli DefAPI lub CSP strony blokuje połączenie, użyj adaptera Tampermonkey.
+Panel pozwala podać prompt, klucz TypeSafe, tryb, limit czasu/kroków i warunek sukcesu. Klucz wpisany w panelu pozostaje w pamięci bieżącej strony. Domyślny transport to `fetch`; jeżeli TypeSafe lub CSP strony blokuje połączenie, użyj adaptera Tampermonkey.
 
 ### Połączenie z własnym skryptem Tampermonkey
 
-We własnym nagłówku ustaw `@require` na prywatnie dostępny adres zbudowanego pliku, `@run-at document-idle`, `@noframes`, `@connect api.defapi.org` oraz granty: `GM_xmlhttpRequest`, `GM_getTab`, `GM_saveTab`. Dopasowania `@match` muszą obejmować strony, po których agent ma nawigować. Przykład używa klucza z `.env` osadzonego podczas budowania:
+We własnym nagłówku ustaw `@require` na prywatnie dostępny adres zbudowanego pliku, `@run-at document-idle`, `@noframes`, `@connect api.typesafe.ai` oraz granty: `GM_xmlhttpRequest`, `GM_getTab`, `GM_saveTab`. Dopasowania `@match` muszą obejmować strony, po których agent ma nawigować. Przykład używa klucza z `.env` osadzonego podczas budowania:
 
 ```js
 Clickator.mount({
@@ -48,7 +50,7 @@ Clickator.mount({
 });
 ```
 
-Alternatywnie możesz przekazać `getApiKey: () => GM_getValue('defapiKey', '')` i ustawić klucz we własnym wrapperze przez `GM_setValue` (wymaga grantów `GM_getValue` i `GM_setValue`). `GM_getTab`/`GM_saveTab` zachowują sesję osobno dla każdej karty, również przy przejściu na inną domenę. Adapter czeka na zapis przed kliknięciem. API adapterów opiera się na [dokumentacji Tampermonkey](https://www.tampermonkey.net/documentation.php).
+Alternatywnie możesz przekazać `getApiKey: () => GM_getValue('typesafeKey', '')` i ustawić klucz we własnym wrapperze przez `GM_setValue` (wymaga grantów `GM_getValue` i `GM_setValue`). `GM_getTab`/`GM_saveTab` zachowują sesję osobno dla każdej karty, również przy przejściu na inną domenę. Adapter czeka na zapis przed kliknięciem. API adapterów opiera się na [dokumentacji Tampermonkey](https://www.tampermonkey.net/documentation.php).
 
 Panel automatycznie używa dostępnych `GM_getTab`/`GM_saveTab` i `GM_xmlhttpRequest`, jeśli nie podano własnych adapterów. Bez adaptera zapisu używany jest `sessionStorage`: wznowienie działa w obrębie tej samej domeny i karty. Bez stałego dostawcy klucza panel po przeładowaniu wymaga jego ponownego podania i kliknięcia „Wznów”. `autoResume` domyślnie jest włączone; `autoResume: false` przywraca ręczne wznawianie. Zapis nie zawiera klucza API, ale zawiera prompt, historię i ostatnie stany strony służące wykrywaniu pętli. Stop usuwa zapis. Wznowienie zachowuje pierwotny czas startu i licznik kroków; nie odnawia limitów.
 
@@ -77,26 +79,26 @@ await runner.start({
 // console.log(Clickator.scan());
 ```
 
-`start()` kończy się po zakończeniu/zatrzymaniu sesji. `transport(body, {apiKey, signal})` ma zwracać sparsowany JSON odpowiedzi DefAPI. `store` implementuje asynchroniczne `load()`, `save(state)` i `clear()`. `confirm(action)` zwraca boolean lub Promise<boolean>. Błędy działania są raportowane przez `onStatus`; błędy konfiguracji odrzucają Promise `start()`.
+`start()` kończy się po zakończeniu/zatrzymaniu sesji. `transport(body, {apiKey, signal})` ma zwracać sparsowany JSON odpowiedzi TypeSafe. `store` implementuje asynchroniczne `load()`, `save(state)` i `clear()`. `confirm(action)` zwraca boolean lub Promise<boolean>. Błędy działania są raportowane przez `onStatus`; błędy konfiguracji odrzucają Promise `start()`.
 
 ## Jak działa podejmowanie decyzji
 
 ### Text generation: direct OpenAI API
 
-JEV continues to use DefAPI. Text input generation uses **gpt-5.6-luna** directly through **https://api.openai.com/v1/chat/completions**, with a separate OpenAI key. See the [official model documentation](https://developers.openai.com/api/docs/models/gpt-5.6-luna) and [Structured Outputs](https://developers.openai.com/api/docs/guides/structured-outputs).
+JEV uses the official TypeSafe API directly. Text input generation uses **gpt-5.6-luna** directly through **https://api.openai.com/v1/chat/completions**, with a separate OpenAI key. See the [official model documentation](https://developers.openai.com/api/docs/models/gpt-5.6-luna) and [Structured Outputs](https://developers.openai.com/api/docs/guides/structured-outputs).
 
 Configure both keys in .env, then rebuild:
 
 ```dotenv
-DEFAPI_API_KEY=your_defapi_key
+TYPESAFE_API_KEY=your_typesafe_key
 OPENAI_API_KEY=your_openai_key
 ```
 
-Run `npm run build` and update the userscript. The Tampermonkey wrapper needs both `@connect api.defapi.org` and `@connect api.openai.com`. Both keys are embedded in the private bundle. The panel also accepts an OpenAI key in memory; the programmatic alternatives are `openaiApiKey` or `getOpenAIKey`. A missing OpenAI key stops text generation; the DefAPI key is never used as a fallback.
+Run `npm run build` and update the userscript. The Tampermonkey wrapper needs both `@connect api.typesafe.ai` and `@connect api.openai.com`. Both keys are embedded in the private bundle. The panel also accepts an OpenAI key in memory; the programmatic alternatives are `openaiApiKey` or `getOpenAIKey`. A missing OpenAI key stops text generation; the TypeSafe key is never used as a fallback.
 
 Luna receives only the goal, field label (up to 160 characters), and maximum length. The response uses a strict JSON schema with a string-or-null value and `store: false`. Refusals, incomplete responses, invalid JSON, and invalid values stop execution. Filling and submitting remain separate JEV actions; manual mode requires approval of the exact generated value. Logging, Stop, and stale-DOM checks still apply.
 
-Custom transports receive the selected provider's key in `apiKey`. Route model `gpt-5.6-luna` with its `messages` and `response_format` to OpenAI, and JEV to DefAPI. Both request bodies are sent unchanged. Local tests cover routing, credentials, parsing, and the fill/search flow; live OpenAI verification requires OPENAI_API_KEY.
+Custom transports receive the selected provider's key in `apiKey`. Route model `gpt-5.6-luna` with its `messages` and `response_format` to OpenAI, and JEV to TypeSafe. Both request bodies are sent unchanged. Local tests cover routing, credentials, parsing, and the fill/search flow; live OpenAI verification requires OPENAI_API_KEY.
 
 ### Logi requestów i odpowiedzi JEV
 
@@ -121,7 +123,7 @@ Testy używają atrapy systemu plików; zapis przez okno wyboru folderu wymaga s
 1. Skanowanie dostępnych buttonów, linków, checkboxów, radio, selectów i podstawowych interaktywnych ról ARIA. Etykiety pochodzą m.in. z `label`, `aria-label`, `aria-labelledby`, tekstu i tytułów.
 2. Grupowanie: preferowane `fieldset`, grupy ARIA i kontenery semantyczne. W pozostałych przypadkach wyszukiwany jest najbliższy wspólny rodzic kontrolek; rodzic obejmujący pytanie jest dołączany, gdy nie dodaje nowych kontrolek. Każda akcja zawiera ID swojej grupy, której tekst trafia do modelu. To heurystyka, nie gwarancja dla dowolnego HTML.
 3. Pierwsze żądanie (`state.stage: component`) podaje krótkie opisy komponentów, zaznaczenia, liczbę i rodzaje akcji — bez listy wszystkich akcji. JEV wybiera ID komponentu (`g…`), `done` albo `blocked`. Opis komponentu ma do 320 znaków, przegląd strony do 1200, a historia obejmuje osiem ostatnich akcji. Komponenty bez dostępnych akcji są widoczne jako kontekst, ale nie można ich wybrać.
-4. Drugie żądanie (`state.stage: action`) przekazuje pełny kontekst tylko wybranego komponentu oraz wyłącznie jego akcje. JEV wybiera ID akcji (`a…`) albo `blocked`. Nie może wybrać akcji innego komponentu ani zakończyć całego celu na podstawie tego lokalnego widoku. Integracja używa pytań `next: choice`, `achieved: noul`, endpointu `POST https://api.defapi.org/api/v1/decisions` i Bearer auth zgodnie z [dokumentacją JEV](https://defapi.org/api/model/en/typesafe/jev-1.13).
+4. Drugie żądanie (`state.stage: action`) przekazuje pełny kontekst tylko wybranego komponentu oraz wyłącznie jego akcje. JEV wybiera ID akcji (`a…`) albo `blocked`. Nie może wybrać akcji innego komponentu ani zakończyć całego celu na podstawie tego lokalnego widoku. Integracja używa pytań `next: choice`, `achieved: noul`, endpointu `POST https://api.typesafe.ai/v1/systemone` i Bearer auth zgodnie z [dokumentacją JEV](https://docs.typesafe.ai/api).
 5. Sprawdzenie aktualności DOM po każdym etapie, pewności obu wyborów i ewentualnej zgody. Wykonanie **jednej** akcji, odczekanie i ponowny skan. Jeśli którykolwiek wybór jest poniżej progu, manualny pyta o zgodę na konkretną akcję, a YOLO zatrzymuje się. Limit kroków nadal liczy wykonane akcje, natomiast logi numerują osobno każde wywołanie API.
 
 ### Filtry i kolejność komponentów
@@ -161,7 +163,7 @@ Dropdowny: natywne `select` oferują konkretne opcje (także zaznaczanie/odznacz
 - Skan obejmuje do 160 kontrolek i 240 akcji na komponent; lokalnie zbierany tekst strony do 10 000 znaków, grupy do 1600. Do JEV trafiają ograniczone widoki opisane powyżej. Duże formularze mogą wymagać zawężenia skanowania. Panel sygnalizuje skrócenie listy. Warunek tekstowy dotyczy lokalnie zebranego fragmentu tekstu; dla długich stron użyj selektora.
 - Okres oczekiwania po akcji jest konfigurowalny; wolno aktualizujące się aplikacje mogą wymagać większego `settleMs`. Stale zmieniający się tekst może uniemożliwić wykonanie decyzji.
 - Linki otwierane są w tej samej karcie; popupów otwieranych kodem strony nie przejmuje. Pełna nawigacja wymaga uruchomienia wrappera także na stronie docelowej. Bez niego kontynuacja nie nastąpi.
-- Tekst strony, opisy kontrolek i wartości obsługiwanych pól text/search trafiają do DefAPI i włączonych logów. Hasła oraz pliki nie są pobierane. Tekst strony jest oznaczany jako niezaufany, ale prompt nie gwarantuje odporności na prompt injection. Nie przekazuj klucza do kontekstu JS strony; preferuj sandbox Tampermonkey.
+- Tekst strony, opisy kontrolek i wartości obsługiwanych pól text/search trafiają do TypeSafe i włączonych logów. Hasła oraz pliki nie są pobierane. Tekst strony jest oznaczany jako niezaufany, ale prompt nie gwarantuje odporności na prompt injection. Nie przekazuj klucza do kontekstu JS strony; preferuj sandbox Tampermonkey.
 - Nie wykonano wywołania płatnego JEV ani testu integracyjnego w Tampermonkey — potrzebny jest klucz i docelowa strona. Schemat API zweryfikowano w dokumentacji, wykonanie i scenariusze zatrzymania sprawdzono lokalnymi testami.
 
 ### Automatyczne przejście z kategorii do koszyka

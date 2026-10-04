@@ -6,7 +6,7 @@ try {
 } catch (error) {
   if (error.code !== 'ENOENT') throw error;
 }
-const apiKey = process.env.DEFAPI_API_KEY ?? fileEnv.DEFAPI_API_KEY ?? '';
+const apiKey = process.env.TYPESAFE_API_KEY ?? fileEnv.TYPESAFE_API_KEY ?? '';
 const openaiApiKey = process.env.OPENAI_API_KEY ?? fileEnv.OPENAI_API_KEY ?? '';
 const files = ['core', 'dom', 'logging', 'runtime', 'panel', 'tampermonkey'];
 const code = await Promise.all(files.map(name => readFile(`src/${name}.js`, 'utf8')));

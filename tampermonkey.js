@@ -14,7 +14,7 @@
 // @grant        GM_saveTab
 // @grant        GM_getValue
 // @grant        GM_setValue
-// @connect      api.defapi.org
+// @connect      api.typesafe.ai
 // @connect      api.openai.com
 // ==/UserScript==
 
