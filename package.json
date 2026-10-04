@@ -1,0 +1,21 @@
+{
+  "name": "clickator",
+  "version": "1.0.0",
+  "description": "Prompt-driven browser automation using TypeSafe JEV",
+  "main": "dist/clickator.js",
+  "directories": {
+    "test": "tests"
+  },
+  "scripts": {
+    "build": "node build.mjs",
+    "test": "node --test tests/*.test.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "module",
+  "private": true,
+  "devDependencies": {
+    "jsdom": "^30.1.1"
+  }
+}

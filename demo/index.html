@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="pl"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Clickator · quiz testowy</title>
+<style>body{font:16px/1.6 system-ui;background:#f0f3f8;color:#18253b;max-width:760px;padding:30px;margin:auto}fieldset{background:white;border:1px solid #cad4e2;border-radius:12px;margin:18px 0;padding:20px}legend{font-weight:700}label{display:block;padding:7px}button{padding:12px 24px;background:#193766;color:white;border:0;border-radius:8px;font:inherit}#result{font-weight:700}</style>
+<h1>Quiz · 10 niezależnych pytań</h1><p>Strona do testowania grupowania i akcji. Panel używa prawdziwego JEV po podaniu klucza; transport fetch wymaga CORS. Możesz też uruchomić własny wrapper Tampermonkey.</p>
+<form id="quiz"><div id="questions"></div><button type="submit">Sprawdź odpowiedzi</button></form><p id="result" role="status"></p>
+<script>
+for (let i = 1; i <= 10; i++) {
+  const field = document.createElement('fieldset');
+  field.innerHTML = `<legend>Pytanie ${i}: ile wynosi ${i} + ${i}?</legend>` + [i * 2 - 1, i * 2, i * 2 + 1].map(n => `<label><input type="radio" name="q${i}" value="${n}" required> ${n}</label>`).join('');
+  document.querySelector('#questions').append(field);
+}
+document.querySelector('#quiz').onsubmit = event => {
+  event.preventDefault();
+  const values = new FormData(event.target);
+  const score = Array.from({length:10}, (_,i) => Number(values.get(`q${i + 1}`)) === (i + 1) * 2).filter(Boolean).length;
+  document.querySelector('#result').textContent = `Quiz zakończony. Wynik: ${score}/10`;
+};
+</script><script src="../dist/clickator.js"></script><script>Clickator.mount();</script></html>

@@ -1,0 +1,209 @@
+import { validateConfig, requestBody, componentSummaries, parseDecision, fetchTransport, fingerprint, localSuccess } from './core.js';
+import { scan, execute } from './dom.js';
+
+const STORE_KEY = 'clickator.session.v1';
+export function sessionStore(doc) {
+  return {
+    async load() { return JSON.parse(doc.defaultView.sessionStorage.getItem(STORE_KEY) || 'null'); },
+    async save(value) { doc.defaultView.sessionStorage.setItem(STORE_KEY, JSON.stringify(value)); },
+    async clear() { doc.defaultView.sessionStorage.removeItem(STORE_KEY); },
+  };
+}
+
+export class Runner {
+  constructor(options = {}) {
+    this.doc = options.document || document;
+    this.transport = options.transport || fetchTransport;
+    this.logger = options.logger || null;
+    this.getApiKey = options.getApiKey || (() => options.apiKey || '');
+    this.store = options.store || sessionStore(this.doc);
+    this.onStatus = options.onStatus || (() => {});
+    this.confirm = options.confirm || (async action => this.doc.defaultView.confirm(`Clickator: ${action.label}\n${action.optionLabel || action.href || action.kind}\n${action.context || ''}\nPewność: ${Math.round(action.confidence * 100)}% (próg ${Math.round(action.threshold * 100)}%)\nZezwolić na akcję?`));
+    this.running = false;
+    this.pending = null;
+    this.state = null;
+  }
+  emit(message) { this.onStatus(message, this.state); }
+  async stop(reason = 'Zatrzymano przez użytkownika.') {
+    this.running = false;
+    this.controller?.abort();
+    this.pending = null;
+    if (this.state) this.state.active = false;
+    await this.store.clear();
+    this.emit(reason);
+  }
+  async resume({ allowMissingLogger = false } = {}) {
+    if (this.busy) throw new Error('Poczekaj na zakończenie poprzedniej sesji.');
+    const state = await this.store.load();
+    if (!state?.active) return;
+    state.config = validateConfig(state.config);
+    if (state.logging && !this.logger) {
+      if (!allowMissingLogger) throw new Error('Wybierz ponownie folder logów przed wznowieniem sesji.');
+      state.logging = false;
+    }
+    if (!Array.isArray(state.history) || !Array.isArray(state.seen) || !Number.isInteger(state.steps) || !Number.isFinite(state.startedAt)) throw new Error('Nieprawidłowa zapisana sesja.');
+    this.state = state;
+    return this.run();
+  }
+  async start(config) {
+    if (this.busy) throw new Error('Poczekaj na zakończenie poprzedniej sesji.');
+    this.state = { config: validateConfig(config), active: true, steps: 0, startedAt: Date.now(), history: [], seen: [], unchanged: 0, successVotes: 0, requestId: 0, logging: !!this.logger };
+    return this.run();
+  }
+  async decide(snapshot, componentId = null) {
+    const id = this.state.requestId = (this.state.requestId || 0) + 1;
+    const body = requestBody(this.state.config.goal, snapshot, this.state.history, componentId);
+    const stage = componentId === null ? 'wybór komponentu' : 'wybór akcji';
+    const log = async (kind, value) => {
+      if (this.logger) await this.logger.write(`${kind}-${id}.json`, value);
+    };
+    if (this.logger) this.emit(`Zapisuję log żądania ${id} · ${stage}`);
+    await log('request', body);
+    await log('response', { status: 'pending' });
+    // Preserve numbering if the page is reloaded during the request.
+    if (this.logger && this.running) {
+      this.emit(`Zapisuję sesję przed żądaniem ${id} · ${stage}`);
+      await this.store.save(this.state);
+    }
+    if (!this.running) { await this.store.clear(); return; }
+    const timeout = setTimeout(() => this.controller.abort(), 30000);
+    try {
+      const apiKey = await this.getApiKey();
+      if (this.transport === fetchTransport && !apiKey) throw new Error('Podaj klucz API.');
+      // Race also protects against transports that ignore AbortSignal.
+      const signal = this.controller.signal;
+      if (signal.aborted) throw new Error('Przerwano żądanie.');
+      let abort;
+      const aborted = new Promise((_, reject) => { abort = () => reject(new Error('Przerwano żądanie lub przekroczono czas.')); signal.addEventListener('abort', abort, { once: true }); });
+      try {
+        this.emit(`Czekam na odpowiedź JEV · ${stage} · żądanie ${id} (limit 30 s)`);
+        const result = await Promise.race([this.transport(body, { apiKey, signal }), aborted]);
+        if (this.logger && this.running) this.emit(`Zapisuję odpowiedź JEV · żądanie ${id}`);
+        await log('response', result);
+        return result;
+      } finally { signal.removeEventListener('abort', abort); }
+    } catch (error) {
+      await log('response', { status: 'error', message: error.message, ...(error.response !== undefined ? { response: error.response } : {}) });
+      throw error;
+    } finally { clearTimeout(timeout); }
+  }
+  async approve(action) {
+    const signal = this.controller.signal;
+    if (signal.aborted) return false;
+    let abort;
+    const aborted = new Promise(resolve => { abort = () => resolve(false); signal.addEventListener('abort', abort, { once: true }); });
+    try { return await Promise.race([this.confirm(action), aborted]); }
+    finally { signal.removeEventListener('abort', abort); }
+  }
+  async run() {
+    this.busy = true;
+    this.running = true;
+    this.controller = new AbortController();
+    const state = this.state;
+    const config = state.config;
+    const deadline = state.startedAt + config.maxMinutes * 60000;
+    const deadlineTimer = setTimeout(() => { void this.stop('Osiągnięto limit czasu.'); }, Math.max(0, deadline - Date.now()));
+    try {
+      if (this.logger && !state.requestId) await this.logger.reset();
+      while (this.running) {
+        if (Date.now() >= deadline) return await this.stop('Osiągnięto limit czasu.');
+        const snapshot = scan(this.doc);
+        const page = snapshot.publicState;
+        if (localSuccess(config, page, this.doc)) return await this.stop('Cel osiągnięty: spełniono podany warunek.');
+        if (state.steps >= config.maxSteps) return await this.stop('Osiągnięto limit kroków.');
+        const before = fingerprint(page);
+        this.emit(`Analizuję stronę · krok ${state.steps + 1}/${config.maxSteps}${page.truncated ? ' · lista elementów skrócona' : ''}`);
+        const data = await this.decide(page);
+        if (!this.running) return;
+        const components = componentSummaries(page).filter(group => group.actionCount);
+        let decision = parseDecision(data, components, config.confidence);
+        const componentDecision = decision;
+        const component = components.find(group => group.id === decision.choice);
+        if (component) {
+          const intermediate = scan(this.doc);
+          if (fingerprint(intermediate.publicState) !== before || [...snapshot.refs].some(([id, ref]) => intermediate.refs.get(id)?.el !== ref.el)) {
+            state.stale = (state.stale || 0) + 1;
+            if (state.stale >= 5) return await this.stop('Strona stale się zmienia. Spróbuj ponownie po zakończeniu ładowania.');
+            await this.delay();
+            continue;
+          }
+          if (decision.uncertain && config.mode === 'yolo') return await this.stop(`Wstrzymano: pewność wyboru komponentu ${Math.round(decision.confidence * 100)}% poniżej progu ${Math.round(config.confidence * 100)}%.`);
+          this.emit(`Wybieram akcję w komponencie: ${component.heading || component.summary}`);
+          const actionData = await this.decide(page, component.id);
+          if (!this.running) return;
+          decision = parseDecision(actionData, page.actions.filter(action => action.group === component.id), config.confidence);
+          if (decision.choice === 'done') throw new Error('Etap akcji nie może zakończyć całego celu.');
+          decision.confidence = Math.min(componentDecision.confidence, decision.confidence);
+          decision.uncertain = decision.confidence < config.confidence;
+        }
+        // Never execute a decision against a different DOM snapshot.
+        const fresh = scan(this.doc);
+        if (fingerprint(fresh.publicState) !== before || [...snapshot.refs].some(([id, ref]) => fresh.refs.get(id)?.el !== ref.el)) {
+          state.stale = (state.stale || 0) + 1;
+          if (state.stale >= 5) return await this.stop('Strona stale się zmienia. Spróbuj ponownie po zakończeniu ładowania.');
+          await this.delay();
+          continue;
+        }
+        state.stale = 0;
+        const needsConfidenceApproval = decision.uncertain && config.mode === 'manual' && fresh.refs.has(decision.choice);
+        if (decision.uncertain && !needsConfidenceApproval) return await this.stop(`Wstrzymano: pewność ${Math.round(decision.confidence * 100)}% poniżej progu ${Math.round(config.confidence * 100)}%. Zmień próg w panelu lub użyj trybu manualnego, aby zatwierdzać niepewne akcje.`);
+        if (decision.choice === 'blocked') return await this.stop('JEV nie znalazł kolejnej akcji. Potrzebna interwencja użytkownika.');
+        if (decision.choice === 'done') {
+          if (config.success) return await this.stop('JEV sugeruje koniec, ale podany warunek sukcesu nie został spełniony.');
+          if (decision.achieved < config.successThreshold) return await this.stop('Nie można potwierdzić osiągnięcia celu.');
+          state.successVotes++;
+          if (state.successVotes >= 2) return await this.stop('JEV dwukrotnie ocenił cel jako osiągnięty (ocena modelu).');
+          this.emit('Weryfikuję zakończenie drugim odczytem strony…');
+          await this.delay();
+          continue;
+        }
+        state.successVotes = 0;
+        const ref = fresh.refs.get(decision.choice);
+        const action = ref.action;
+        const signature = JSON.stringify([before, action]);
+        if (state.seen.filter(x => x === signature).length >= 2) return await this.stop('Wykryto pętlę: powtarzana akcja w tym samym stanie strony.');
+        if (config.mode === 'manual' && (needsConfidenceApproval || !['checkbox', 'radio'].includes(action.kind))) {
+          this.emit(`Czekam na zgodę: ${action.label}${needsConfidenceApproval ? ` · pewność ${Math.round(decision.confidence * 100)}%, próg ${Math.round(config.confidence * 100)}%` : ''}`);
+          const approved = await this.approve({ ...action, confidence: decision.confidence, threshold: config.confidence, context: page.groups.find(group => group.id === action.group)?.text || '' });
+          if (!this.running) return;
+          if (!approved) return await this.stop('Akcja odrzucona.');
+          const afterApproval = scan(this.doc);
+          if (fingerprint(afterApproval.publicState) !== before || afterApproval.refs.get(action.id)?.el !== ref.el) continue;
+        }
+        if (!this.running || Date.now() >= deadline) return;
+        state.steps++;
+        state.seen.push(signature);
+        state.seen = state.seen.slice(-10);
+        state.history.push({ url: page.url, component: component?.heading || component?.summary, action, step: state.steps });
+        state.history = state.history.slice(-12);
+        // Checkpoint BEFORE clicking: a full navigation can destroy this context.
+        this.emit(`Zapisuję sesję przed wykonaniem: ${action.label}`);
+        await this.store.save(state);
+        if (!this.running) { await this.store.clear(); return; }
+        this.emit(`Wykonuję: ${action.label}${action.optionLabel ? ' → ' + action.optionLabel : ''}`);
+        execute(ref);
+        this.emit(`Wysłano akcję: ${action.label} · czekam na zmianę strony`);
+        await this.delay();
+        if (!this.running) return;
+        const after = fingerprint(scan(this.doc).publicState);
+        state.unchanged = before === after ? state.unchanged + 1 : 0;
+        if (state.unchanged >= 2) return await this.stop('Brak widocznego postępu po dwóch akcjach.');
+      }
+    } catch (error) {
+      if (this.running) await this.stop(`Błąd: ${error.message}`);
+    } finally {
+      clearTimeout(deadlineTimer);
+      this.running = false;
+      this.busy = false;
+    }
+  }
+  delay() {
+    const signal = this.controller.signal;
+    return new Promise(resolve => {
+      const finish = () => { clearTimeout(timer); signal.removeEventListener('abort', finish); resolve(); };
+      const timer = setTimeout(finish, this.state.config.settleMs);
+      signal.addEventListener('abort', finish, { once: true });
+      if (signal.aborted) finish();
+    });
+  }
+}
