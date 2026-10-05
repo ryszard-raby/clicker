@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { JSDOM } from 'jsdom';
 import { scan } from '../src/dom.js';
-import { requestBody } from '../src/core.js';
+import { requestBody, actionGroups } from '../src/core.js';
 import { Runner } from '../src/runtime.js';
 
 function doc(html) {
@@ -12,6 +12,65 @@ function doc(html) {
 }
 const answer = (choice, confidence = 1) => ({ answers: { next: { type: 'choice', choice, confidence }, achieved: { type: 'noul', noul: 0 } } });
 const store = () => ({ async save() {}, async clear() {} });
+
+test('large action components are narrowed before sending actionable choices', async () => {
+  const document = doc('<p>Offers</p>');
+  const page = { url: document.URL, title: 'Offers', text: 'Offers', groups: [{ id: 'g0', text: 'Offers', heading: 'Offers', selected: [] }], actions: Array.from({ length: 128 }, (_, i) => ({ id: `a${i}`, group: 'g0', kind: 'click', label: `Offer ${i}`, context: `Shop ${Math.floor(i / 4)}` })) };
+  const batches = actionGroups(page, 'g0');
+  assert.ok(batches.length <= 16);
+  assert.equal(new Set(batches.flatMap(group => group.actionIds)).size, 128);
+  const stages = [];
+  const runner = new Runner({ planning: false, debug: false, document, store: store(), transport: async body => {
+    stages.push(body.state.stage);
+    if (body.state.stage === 'action-group') {
+      assert.ok(body.state.page.components.length <= 16);
+      assert.equal(body.state.page.actions, undefined);
+      assert.equal(body.questions.next.criteria.done, undefined);
+      return answer(body.state.page.components.at(-1).id);
+    }
+    assert.ok(body.state.page.actions.length <= 24);
+    return answer(body.state.page.actions.at(-1).id);
+  } });
+  runner.state = { config: { goal: 'Choose last offer', confidence: 0.2 }, history: [], startedAt: Date.now() };
+  runner.running = true;
+  runner.controller = new AbortController();
+  const result = await runner.decide(page, 'g0');
+  assert.equal(result.answers.next.choice, 'a127');
+  assert.deepEqual(stages, ['action-group', 'action']);
+});
+
+test('crowded recommendations collapse into sections without losing scanned actions', () => {
+  const cards = prefix => Array.from({ length: 20 }, (_, i) => `<div><article><a href="/${prefix}/${i}">${prefix} ${i}</a><button>Add</button></article></div>`).join('');
+  const page = scan(doc(`<main><section><h2>Recommended</h2>${cards('Recommended')}</section><section><h2>Recent</h2>${cards('Recent')}</section></main>`)).publicState;
+  assert.ok(page.groups.length <= 24);
+  assert.equal(page.actions.length, 80);
+  assert.equal(new Set(page.actions.slice(0, 40).map(action => action.group)).size, 1);
+  assert.notEqual(page.actions[0].group, page.actions[40].group);
+  const body = requestBody('Find a product', page, []);
+  assert.ok(body.state.page.components.every(group => group.clickLabels.length <= 8));
+});
+
+test('adaptive grouping preserves separate quiz questions on crowded pages', () => {
+  const page = scan(doc(`<main>${Array.from({ length: 30 }, (_, i) => `<fieldset><legend>Question ${i}</legend><label><input type="radio" name="q${i}">Yes</label><label><input type="radio" name="q${i}">No</label></fieldset>`).join('')}</main>`)).publicState;
+  assert.equal(page.groups.length, 30);
+  assert.equal(page.actions.length, 60);
+});
+
+test('header controls form one component while main stays separate', () => {
+  const page = scan(doc('<div><header><a href="/">Logo</a><form><input placeholder="Search"><button>Search</button></form><nav><a href="/cart">Cart</a></nav></header><main><section><button>Product</button></section></main></div>')).publicState;
+  assert.equal(page.groups.length, 2);
+  assert.equal(new Set(page.actions.slice(0, 4).map(action => action.group)).size, 1);
+  assert.notEqual(page.actions.at(-1).group, page.actions[0].group);
+});
+
+test('recommendation cards share their parent and retain product context', () => {
+  const page = scan(doc('<main><section><h2>Recommended</h2><ul><li><a href="/red">Red hoodie</a><button>Add</button></li><li><a href="/black">Black hoodie</a><button>Add</button></li></ul></section><section><button>Other</button></section></main>')).publicState;
+  assert.equal(new Set(page.actions.slice(0, 4).map(action => action.group)).size, 1);
+  const buttons = page.actions.filter(action => action.label === 'Add');
+  assert.match(buttons[0].context, /Red hoodie/);
+  assert.match(buttons[1].context, /Black hoodie/);
+  assert.notEqual(page.actions.at(-1).group, page.actions[0].group);
+});
 
 test('product title and visible main heading reach both stages outside the action component', () => {
   const document = doc('<title>Sklep — Bluza</title><h1 hidden>Nieaktualny produkt</h1><h1>Bluza bawełniana</h1><section><button>Dodaj do koszyka</button></section>');

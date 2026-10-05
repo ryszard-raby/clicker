@@ -128,7 +128,7 @@ Testy używają atrapy systemu plików; zapis przez okno wyboru folderu wymaga s
 
 ### Wyskakujące okna
 
-Skaner daje pierwszeństwo widocznym `dialog[open]`, `[role="dialog"]`, `[role="alertdialog"]` i `[aria-modal="true"]`. W aktywnym oknie wybiera jego kontrolki oraz elementy powiązane przez `aria-controls` / `aria-owns` (np. listę rozwijaną renderowaną poza oknem). Ograniczenie do 160 kontrolek stosuje dopiero po tym zawężeniu. Po zamknięciu okna wraca do pozostałej strony. JEV otrzymuje także opis `activeDialog`.
+Skaner daje pierwszeństwo widocznym `dialog[open]`, `[role="dialog"]`, `[role="alertdialog"]` i `[aria-modal="true"]`. W aktywnym oknie wybiera jego kontrolki oraz elementy powiązane przez `aria-controls` / `aria-owns` (np. listę rozwijaną renderowaną poza oknem). Ograniczenie do 320 kontrolek stosuje dopiero po tym zawężeniu. Po zamknięciu okna wraca do pozostałej strony. JEV otrzymuje także opis `activeDialog`.
 
 Dla kontrolek w obszarze ekranu skaner sprawdza zasłonięcie przez `elementsFromPoint`; własny pasek Clickatora jest pomijany. Tuż przed wykonaniem ponownie sprawdza dostępność elementu i aktywne okno. Wykrycie nakładki w tym ostatnim momencie zatrzymuje zadanie zamiast klikać pod nią. Kontrolki poza ekranem pozostają dostępne w aktualnym obszarze działania.
 
@@ -174,7 +174,7 @@ Dropdowny: natywne `select` oferują konkretne opcje (także zaznaczanie/odznacz
 
 - Standardowy DOM głównego dokumentu; brak obsługi iframe, shadow DOM stron, canvas, drag-and-drop i zdarzeń wymagających `isTrusted`.
 - Generuje tekst dla pól text/search przez Lunę. Nie obsługuje textarea, contenteditable, pól password/email/number ani uploadu; pola readonly są pomijane.
-- Skan obejmuje do 160 kontrolek i 240 akcji na komponent; lokalnie zbierany tekst strony do 10 000 znaków, grupy do 1600. Do JEV trafiają ograniczone widoki opisane powyżej. Duże formularze mogą wymagać zawężenia skanowania. Panel sygnalizuje skrócenie listy. Warunek tekstowy dotyczy lokalnie zebranego fragmentu tekstu; dla długich stron użyj selektora.
+- Skan obejmuje do 320 kontrolek i 240 akcji na komponent; lokalnie zbierany tekst strony do 10 000 znaków, grupy do 1600. Do JEV trafiają ograniczone widoki opisane powyżej. Duże formularze mogą wymagać zawężenia skanowania. Panel sygnalizuje skrócenie listy. Warunek tekstowy dotyczy lokalnie zebranego fragmentu tekstu; dla długich stron użyj selektora.
 - Okres oczekiwania po akcji jest konfigurowalny; wolno aktualizujące się aplikacje mogą wymagać większego `settleMs`. Stale zmieniający się tekst może uniemożliwić wykonanie decyzji.
 - Linki otwierane są w tej samej karcie; popupów otwieranych kodem strony nie przejmuje. Pełna nawigacja wymaga uruchomienia wrappera także na stronie docelowej. Bez niego kontynuacja nie nastąpi.
 - Tekst strony, opisy kontrolek i wartości obsługiwanych pól text/search trafiają do TypeSafe i włączonych logów. Hasła oraz pliki nie są pobierane. Tekst strony jest oznaczany jako niezaufany, ale prompt nie gwarantuje odporności na prompt injection. Nie przekazuj klucza do kontekstu JS strony; preferuj sandbox Tampermonkey.

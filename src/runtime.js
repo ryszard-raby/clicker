@@ -1,5 +1,6 @@
 import { validateConfig, requestBody, componentSummaries, parseDecision, fetchTransport, fingerprint, localSuccess, textRequest, parseText, endpointFor, payloadFor, TEXT_MODEL } from './core.js';
 import { scan, execute } from './dom.js';
+import { actionGroups } from './core.js';
 import { classificationRequest, parseComplexity, planRequest, parsePlan, validateTasks } from './planning.js';
 
 const STORE_KEY = 'clickator.session.v1';
@@ -100,6 +101,23 @@ export class Runner {
     if (this.running && this.state.classification === 'complex') await this.makePlan(page);
   }
   async decide(snapshot, componentId = null) {
+    let groupConfidence = 1;
+    while (componentId !== null && snapshot.actions.filter(action => action.group === componentId).length > 24) {
+      const groups = actionGroups(snapshot, componentId);
+      const actions = groups.flatMap(group => snapshot.actions.filter(action => group.actionIds.includes(action.id)).map(action => ({ ...action, group: group.id })));
+      const body = requestBody(this.currentGoal(), { ...snapshot, groups, actions }, this.state.history);
+      body.state.stage = 'action-group';
+      delete body.questions.next.criteria.done;
+      body.questions.next.instructions += ' Choose a subgroup inside the already selected component. Completion cannot be declared in this stage; select blocked if no subgroup helps.';
+      const data = await this.send(body, 'wybór podgrupy akcji');
+      if (!this.running) return;
+      const decision = parseDecision(data, groups, this.state.config.confidence);
+      if (decision.choice === 'done') throw new Error('Podgrupa nie może zakończyć celu.');
+      if (decision.choice === 'blocked' || decision.uncertain) return { ...data, answers: { ...data.answers, next: { ...data.answers.next, choice: 'blocked', confidence: decision.confidence } } };
+      groupConfidence = Math.min(groupConfidence, decision.confidence);
+      const selected = groups.find(group => group.id === decision.choice);
+      snapshot = { ...snapshot, actions: snapshot.actions.filter(action => action.group !== componentId || selected.actionIds.includes(action.id)) };
+    }
     const body = requestBody(this.currentGoal(), snapshot, this.state.history, componentId);
     const task = this.state.plan?.tasks[this.state.plan.index];
     if (task) {
@@ -109,7 +127,13 @@ export class Runner {
       body.questions.achieved.instructions += scope;
     }
     const stage = componentId === null ? 'wybór komponentu' : 'wybór akcji';
-    return this.send(body, stage);
+    const data = await this.send(body, stage);
+    if (data && groupConfidence < 1) {
+      const next = data.answers?.next;
+      const confidence = next?.confidence ?? next?.probabilities?.[next?.choice];
+      if (Number.isFinite(confidence)) next.confidence = Math.min(confidence, groupConfidence);
+    }
+    return data;
   }
   async send(body, stage) {
     const id = this.state.requestId = (this.state.requestId || 0) + 1;

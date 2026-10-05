@@ -75,7 +75,7 @@ export function labelOf(el) {
 }
 
 // First meaningful common ancestor, with semantic boundaries preferred.
-export function groupFor(el, controls) {
+function localGroupFor(el, controls) {
   const semantic = el.closest(SEMANTIC);
   if (semantic && controls.filter(x => semantic.contains(x)).length <= 30) return semantic;
   let parent = el.parentElement;
@@ -94,21 +94,64 @@ export function groupFor(el, controls) {
   return fallback;
 }
 
+export function groupFor(el, controls) {
+  const local = localGroupFor(el, controls);
+  const protectedGroup = el.closest('fieldset, [role="radiogroup"], [role="listbox"], [role="menu"]');
+  if (protectedGroup) return protectedGroup;
+  const count = root => controls.filter(control => root.contains(control)).length;
+  const header = el.closest('header, [role="banner"]');
+  if (header && count(header) <= 80) return header;
+  // Preserve individual questions and forms; expand display/navigation blocks.
+  if (local.matches('form, [role="group"], ' + DIALOG)) return local;
+  const outer = local.parentElement;
+  if (!outer || outer.matches('body, html, main, [role="main"], form, ' + DIALOG)) return local;
+  // Do not absorb unrelated page regions or multiple independent forms/questions.
+  if (outer.querySelector('main, header, footer, [role="main"], [role="banner"], fieldset, [role="radiogroup"]') || outer.querySelectorAll('form').length > 1) return local;
+  return count(outer) <= 80 ? outer : local;
+}
+
+// Coarsen crowded pages without crossing question, popup or page-region boundaries.
+export function adaptiveGroups(controls) {
+  const assigned = new Map(controls.map(el => [el, groupFor(el, controls)]));
+  const protectedRoot = 'fieldset, [role="radiogroup"], [role="listbox"], [role="menu"], form, [role="group"]';
+  for (let level = 0; level < 10 && new Set(assigned.values()).size > 12; level++) {
+    const roots = [...new Set(assigned.values())];
+    const candidates = [...new Set(roots.map(root => root.parentElement))].filter(parent => {
+      if (!parent || parent.matches('html, body, main, [role="main"], ' + protectedRoot + ', ' + DIALOG)) return false;
+      if (parent.querySelector(protectedRoot + ', main, header, footer, [role="main"], [role="banner"], ' + DIALOG)) return false;
+      return controls.filter(el => parent.contains(el)).length <= 160;
+    });
+    let changed = false;
+    for (const parent of candidates) {
+      const children = [...new Set(assigned.values())].filter(root => parent.contains(root));
+      if (children.some(root => root.matches(protectedRoot + ', ' + DIALOG))) continue;
+      for (const [el, root] of assigned) if (children.includes(root) && root !== parent) {
+        assigned.set(el, parent);
+        changed = true;
+      }
+      if (new Set(assigned.values()).size <= 12) break;
+    }
+    if (!changed) break;
+  }
+  return assigned;
+}
+
 export function scan(doc) {
   const dialog = activeDialog(doc);
   const all = [...doc.querySelectorAll(SELECTOR)].filter(el => inDialogScope(el, dialog) && visible(el) && unobscured(el) && !el.matches(':disabled') && !el.closest('[aria-disabled="true"]'));
   // Avoid duplicate nested button/role targets.
   const controls = all.filter(el => el.matches(OPTION) || !all.some(other => other !== el && other.contains(el) && !(other.matches(DROPDOWN) && el.matches('input, select'))));
+  const groupedControls = adaptiveGroups(controls);
   const groups = [];
   const roots = new Map();
   const refs = new Map();
   const actions = [];
-  let truncated = controls.length > 160;
-  for (const el of controls.slice(0, 160)) {
+  let truncated = controls.length > 320;
+  for (const el of controls.slice(0, 320)) {
     if (el.tagName === 'TEXTAREA' || (el.tagName === 'INPUT' && !['text', 'search', 'checkbox', 'radio', 'button', 'submit', 'reset'].includes(el.type)) || (el.readOnly && !el.matches(DROPDOWN))) continue;
     const popup = el.matches(OPTION) ? el.closest('[role="listbox"], [role="menu"]') : null;
     const owner = popup ? controls.find(control => control.matches(DROPDOWN) && (control.contains(popup) || [...(control.getAttribute('aria-controls') || '').split(/\s+/), ...(control.getAttribute('aria-owns') || '').split(/\s+/)].some(id => id && doc.getElementById(id)?.contains(popup)))) : null;
-    const grouped = groupFor(el, controls);
+    const grouped = groupedControls.get(el);
     const root = popup || (dialog?.contains(el) && !dialog.contains(grouped) ? dialog : grouped);
     if (!roots.has(root)) {
       const id = `g${groups.length}`;
@@ -131,6 +174,8 @@ export function scan(doc) {
       const href = el.closest('a[href]')?.href;
       if (href && !/^https?:/i.test(href)) continue;
       const action = { id, group: roots.get(root), kind, label: labelOf(el), ...(kind === 'fill' ? { currentValue: el.value.slice(0, 1000), maxLength: el.maxLength < 0 ? 1000 : Math.min(el.maxLength, 1000), placeholder: clean(el.placeholder, 240) } : {}), ...(checked !== undefined ? { checked } : {}), ...variant, ...(href ? { href } : {}) };
+      const item = el.closest('article, li, [role="listitem"]') || localGroupFor(el, controls);
+      if (item && item !== root && root.contains(item)) action.context = textOf(item, 320);
       actions.push(action);
       refs.set(id, { el, action, root });
     }
