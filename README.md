@@ -126,6 +126,14 @@ Testy używają atrapy systemu plików; zapis przez okno wyboru folderu wymaga s
 4. Drugie żądanie (`state.stage: action`) przekazuje pełny kontekst tylko wybranego komponentu oraz wyłącznie jego akcje. JEV wybiera ID akcji (`a…`) albo `blocked`. Nie może wybrać akcji innego komponentu ani zakończyć całego celu na podstawie tego lokalnego widoku. Integracja używa pytań `next: choice`, `achieved: noul`, endpointu `POST https://api.typesafe.ai/v1/systemone` i Bearer auth zgodnie z [dokumentacją JEV](https://docs.typesafe.ai/api).
 5. Sprawdzenie aktualności DOM po każdym etapie, pewności obu wyborów i ewentualnej zgody. Wykonanie **jednej** akcji, odczekanie i ponowny skan. Jeśli którykolwiek wybór jest poniżej progu, manualny pyta o zgodę na konkretną akcję, a YOLO zatrzymuje się. Limit kroków nadal liczy wykonane akcje, natomiast logi numerują osobno każde wywołanie API.
 
+### Wyskakujące okna
+
+Skaner daje pierwszeństwo widocznym `dialog[open]`, `[role="dialog"]`, `[role="alertdialog"]` i `[aria-modal="true"]`. W aktywnym oknie wybiera jego kontrolki oraz elementy powiązane przez `aria-controls` / `aria-owns` (np. listę rozwijaną renderowaną poza oknem). Ograniczenie do 160 kontrolek stosuje dopiero po tym zawężeniu. Po zamknięciu okna wraca do pozostałej strony. JEV otrzymuje także opis `activeDialog`.
+
+Dla kontrolek w obszarze ekranu skaner sprawdza zasłonięcie przez `elementsFromPoint`; własny pasek Clickatora jest pomijany. Tuż przed wykonaniem ponownie sprawdza dostępność elementu i aktywne okno. Wykrycie nakładki w tym ostatnim momencie zatrzymuje zadanie zamiast klikać pod nią. Kontrolki poza ekranem pozostają dostępne w aktualnym obszarze działania.
+
+Po akcji `MutationObserver` wydłuża oczekiwanie, aż przez 200 ms nie będzie zmian DOM, z zachowaniem minimum `settleMs` (dla wpisywania także `autocompleteMs`). Oczekiwanie kończy się najpóźniej po większej z wartości: ustawione minimum lub 2 sekundy. Stop przerywa je natychmiast. To nie gwarantuje wykrycia popupu, który pojawi się dopiero po zakończeniu oczekiwania; dalsze skany nadal sprawdzają aktualność decyzji. Okna bez semantycznego oznaczenia nie mają gwarantowanego pierwszeństwa, a animacje samego CSS nie wywołują obserwatora. Testy lokalne symulują popupy i zasłonięcia; zachowanie konkretnej strony wymaga weryfikacji w przeglądarce.
+
 ### Filtry i kolejność komponentów
 
 Nie utrzymujemy sztywnej kolejki ID komponentów: identyfikatory obowiązują dla bieżącego skanu. Po zaznaczeniu filtra następuje nowy wybór komponentu na podstawie aktualnego stanu i historii (z opisem poprzedniego komponentu). Model może wybrać kolejny filtr, a następnie komponent zawierający przycisk „Filtruj”. Instrukcja dla JEV wskazuje, że samo zaznaczenie pól nie dowodzi zastosowania filtrów. Mały formularz może stanowić jeden komponent; jego fieldsety lub grupy ARIA mogą tworzyć osobne komponenty. Kolejne wybory pozwalają pracować wielokrotnie w tym samym komponencie.

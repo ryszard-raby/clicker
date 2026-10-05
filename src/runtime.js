@@ -234,8 +234,27 @@ export class Runner {
   delay(duration = this.state.config.settleMs) {
     const signal = this.controller.signal;
     return new Promise(resolve => {
-      const finish = () => { clearTimeout(timer); signal.removeEventListener('abort', finish); resolve(); };
-      const timer = setTimeout(finish, duration);
+      const started = Date.now();
+      let timer;
+      let limit;
+      let observer;
+      const finish = () => { clearTimeout(timer); clearTimeout(limit); observer?.disconnect(); signal.removeEventListener('abort', finish); resolve(); };
+      const schedule = () => {
+        clearTimeout(timer);
+        timer = setTimeout(finish, Math.max(200, duration - (Date.now() - started)));
+      };
+      if (this.doc.defaultView.MutationObserver) {
+        observer = new this.doc.defaultView.MutationObserver(records => {
+          if (records.some(record => {
+            const el = record.target.nodeType === 1 ? record.target : record.target.parentElement;
+            return !el?.closest('[data-clickator-root]');
+          })) schedule();
+        });
+        observer.observe(this.doc.documentElement, { subtree: true, childList: true, attributes: true, characterData: true });
+      }
+      schedule();
+      // Animated banners and clocks must not keep the runner waiting forever.
+      limit = setTimeout(finish, Math.max(duration, 2000));
       signal.addEventListener('abort', finish, { once: true });
       if (signal.aborted) finish();
     });

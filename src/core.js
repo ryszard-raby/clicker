@@ -41,6 +41,7 @@ export function requestBody(goal, snapshot, history, componentId = null) {
     ? { url: snapshot.url, title: snapshot.title, headings: snapshot.headings || [], component, actions, selectedComponents: components.filter(group => group.selected.length).map(({ id, heading, selected }) => ({ id, heading, selected })) }
     : { url: snapshot.url, title: snapshot.title, headings: snapshot.headings || [], overview: snapshot.text.slice(0, 1200), components, truncated: snapshot.truncated };
   const recent = history.slice(-8).map(entry => ({ step: entry.step, url: entry.url, component: entry.component, action: { kind: entry.action.kind, label: entry.action.label, optionLabel: entry.action.optionLabel, desiredChecked: entry.action.desiredChecked, value: entry.action.value } }));
+  if (snapshot.activeDialog) page.activeDialog = snapshot.activeDialog;
   return {
     model: MODEL,
     state: { goal, stage, page, history: recent },

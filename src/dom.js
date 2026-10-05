@@ -2,11 +2,53 @@ const SELECTOR = 'button, a[href], input:not([type="hidden"]), select, textarea,
 const DROPDOWN = '[role="combobox"], [aria-haspopup="listbox"], [aria-haspopup="menu"], [aria-haspopup="true"]';
 const OPTION = '[role="option"], [role="menuitem"], [role="menuitemradio"], [role="menuitemcheckbox"]';
 const SEMANTIC = 'fieldset, [role="radiogroup"], [role="group"], [role="listbox"], form, article, li, section';
+const DIALOG = 'dialog[open], [role="dialog"], [role="alertdialog"], [aria-modal="true"]';
 export const clean = (text, max = 1600) => String(text || '').replace(/\s+/g, ' ').trim().slice(0, max);
 
 export function visible(el) {
   const style = el.ownerDocument.defaultView.getComputedStyle(el);
   return !!el.getClientRects().length && style.visibility !== 'hidden' && style.display !== 'none' && !el.closest('[hidden], [inert], [aria-hidden="true"], [data-clickator-root]');
+}
+
+// Ignore our own floating controls when checking what the page puts on top.
+export function unobscured(el) {
+  const doc = el.ownerDocument;
+  if (!doc.elementsFromPoint) return true;
+  const win = doc.defaultView;
+  const rects = [...el.getClientRects()];
+  let inViewport = false;
+  for (const rect of rects) {
+    const left = Math.max(0, rect.left), right = Math.min(win.innerWidth, rect.right);
+    const top = Math.max(0, rect.top), bottom = Math.min(win.innerHeight, rect.bottom);
+    if (!(right > left && bottom > top)) continue;
+    inViewport = true;
+    for (const [x, y] of [[.5, .5], [.2, .2], [.8, .8]]) {
+      const hit = doc.elementsFromPoint(left + (right - left) * x, top + (bottom - top) * y)
+        .find(node => !node.closest('[data-clickator-root]'));
+      if (hit && (hit === el || el.contains(hit) || (el.labels && [...el.labels].some(label => label === hit || label.contains(hit))))) return true;
+    }
+  }
+  // Offscreen controls remain available; modal scoping still applies to them.
+  return !inViewport;
+}
+
+export function activeDialog(doc) {
+  const candidates = [...doc.querySelectorAll(DIALOG)].filter(el => visible(el) && unobscured(el));
+  const nativeModal = el => { try { return el.matches(':modal'); } catch { return false; } };
+  return candidates.sort((a, b) => {
+    if (a.contains(b)) return -1;
+    if (b.contains(a)) return 1;
+    return Number(nativeModal(a)) - Number(nativeModal(b)) ||
+      (parseInt(doc.defaultView.getComputedStyle(a).zIndex, 10) || 0) - (parseInt(doc.defaultView.getComputedStyle(b).zIndex, 10) || 0);
+  }).at(-1) || null;
+}
+
+function inDialogScope(el, dialog) {
+  if (!dialog || dialog.contains(el)) return true;
+  // Menus/listboxes can be rendered outside the dialog that owns them.
+  return [...dialog.querySelectorAll('[aria-controls], [aria-owns]')].some(owner =>
+    [...(owner.getAttribute('aria-controls') || '').split(/\s+/), ...(owner.getAttribute('aria-owns') || '').split(/\s+/)]
+      .some(id => id && el.ownerDocument.getElementById(id)?.contains(el)));
 }
 
 export function textOf(el, max = 1600) {
@@ -53,7 +95,8 @@ export function groupFor(el, controls) {
 }
 
 export function scan(doc) {
-  const all = [...doc.querySelectorAll(SELECTOR)].filter(el => visible(el) && !el.matches(':disabled') && !el.closest('[aria-disabled="true"]'));
+  const dialog = activeDialog(doc);
+  const all = [...doc.querySelectorAll(SELECTOR)].filter(el => inDialogScope(el, dialog) && visible(el) && unobscured(el) && !el.matches(':disabled') && !el.closest('[aria-disabled="true"]'));
   // Avoid duplicate nested button/role targets.
   const controls = all.filter(el => el.matches(OPTION) || !all.some(other => other !== el && other.contains(el) && !(other.matches(DROPDOWN) && el.matches('input, select'))));
   const groups = [];
@@ -65,7 +108,8 @@ export function scan(doc) {
     if (el.tagName === 'TEXTAREA' || (el.tagName === 'INPUT' && !['text', 'search', 'checkbox', 'radio', 'button', 'submit', 'reset'].includes(el.type)) || (el.readOnly && !el.matches(DROPDOWN))) continue;
     const popup = el.matches(OPTION) ? el.closest('[role="listbox"], [role="menu"]') : null;
     const owner = popup ? controls.find(control => control.matches(DROPDOWN) && (control.contains(popup) || [...(control.getAttribute('aria-controls') || '').split(/\s+/), ...(control.getAttribute('aria-owns') || '').split(/\s+/)].some(id => id && doc.getElementById(id)?.contains(popup)))) : null;
-    const root = popup || groupFor(el, controls);
+    const grouped = groupFor(el, controls);
+    const root = popup || (dialog?.contains(el) && !dialog.contains(grouped) ? dialog : grouped);
     if (!roots.has(root)) {
       const id = `g${groups.length}`;
       roots.set(root, id);
@@ -92,13 +136,15 @@ export function scan(doc) {
     }
   }
   const headings = [...doc.querySelectorAll('h1, [role="heading"][aria-level="1"]')].filter(visible).slice(0, 3).map(el => textOf(el, 240)).filter(Boolean);
-  const publicState = { url: doc.location.href, title: doc.title, headings, text: textOf(doc.body, 10000), groups, actions, truncated };
+  const publicState = { url: doc.location.href, title: doc.title, headings, text: textOf(dialog || doc.body, 10000), groups, actions, truncated,
+    ...(dialog ? { activeDialog: { label: labelOf(dialog), role: dialog.getAttribute('role') || 'dialog' } } : {}) };
   return { publicState, refs };
 }
 
 export function execute(ref) {
   const { el, action } = ref;
   if (!el.isConnected || !visible(el) || el.matches(':disabled') || el.closest('[aria-disabled="true"]')) throw new Error('Element nie jest już dostępny.');
+  if (!inDialogScope(el, activeDialog(el.ownerDocument)) || !unobscured(el)) throw new Error('Element został zasłonięty przez okno lub nakładkę. Ponów zadanie po zmianie strony.');
   if (action.kind === 'fill') {
     if (el.readOnly || typeof action.value !== 'string' || action.value.length > action.maxLength) throw new Error('Nie można wpisać wartości do pola.');
     const win = el.ownerDocument.defaultView;
