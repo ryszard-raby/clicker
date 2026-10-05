@@ -24,7 +24,7 @@ Skopiuj `.env.example` do `.env` w katalogu projektu i uzupełnij:
 TYPESAFE_API_KEY=twoj_klucz_typesafe
 ```
 
-Po migracji z DefAPI podaj nowy klucz z [konsoli TypeSafe](https://console.typesafe.ai). Stara zmienna `DEFAPI_API_KEY` nie jest odczytywana; nie wystarczy zmienić jej nazwy i zachować poprzedni klucz. Zaktualizuj także nagłówek wrappera Tampermonkey na `@connect api.typesafe.ai`.
+Po migracji z DefAPI podaj nowy klucz z [konsoli TypeSafe](https://console.typesafe.ai). Zaktualizuj także nagłówek wrappera Tampermonkey na `@connect api.typesafe.ai`.
 
 Następnie uruchom `npm run build`. `Clickator.mount()` i `Clickator.create()` automatycznie użyją tego klucza; nie trzeba wpisywać go w panelu. Po każdej zmianie `.env` przebuduj skrypt i zaktualizuj kopię ładowaną przez Tampermonkey. Zmienna środowiskowa `TYPESAFE_API_KEY` ma pierwszeństwo przed `.env`. Opcje `apiKey` i `getApiKey` przekazane podczas uruchamiania mają pierwszeństwo przed kluczem z buildu. Bez klucza build nadal działa i można podać go w panelu.
 

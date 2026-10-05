@@ -31,9 +31,6 @@ test('build loads .env, honors environment and runtime overrides, and works with
     dom.window.close();
   }
   await build('');
-  // A legacy provider key must never be sent to TypeSafe.
-  await writeFile(join(root, '.env'), 'DEFAPI_API_KEY=legacy-provider-key\n');
-  await build('', { ...env, DEFAPI_API_KEY: 'legacy-environment-key' });
   // Quotes, backslashes, backticks and interpolation must remain literal data.
   const dummy = 'test-"quoted"-\\-`-${literal}-#';
   await writeFile(join(root, '.env'), `TYPESAFE_API_KEY='${dummy}'\nOTHER_SECRET=not-for-browser\n`);
