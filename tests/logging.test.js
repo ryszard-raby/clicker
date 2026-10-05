@@ -17,7 +17,7 @@ function setup(transport) {
   let checkpoint;
   const store = { async load() { return checkpoint; }, async save(state) { checkpoint = structuredClone(state); }, async clear() { checkpoint = null; } };
   const logger = directoryLogger(directory);
-  const runner = new Runner({ document: dom.window.document, store, logger, apiKey: 'secret-test-key', transport });
+  const runner = new Runner({ planning: false, document: dom.window.document, store, logger, apiKey: 'secret-test-key', transport });
   return { files, logger, runner, store };
 }
 const done = { answers: { next: { type: 'choice', choice: 'done', confidence: 1 }, achieved: { type: 'noul', noul: 1 } } };

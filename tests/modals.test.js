@@ -63,7 +63,7 @@ test('popup appearing during model request invalidates decision and is handled f
   const doc = page('<button id="buy">Buy</button>');
   let bought = false, closed = false, calls = 0;
   doc.querySelector('#buy').onclick = () => { bought = true; };
-  const runner = new Runner({ document: doc, store, debug: false, transport: async body => {
+  const runner = new Runner({ planning: false, document: doc, store, debug: false, transport: async body => {
     if (++calls === 1) {
       doc.body.insertAdjacentHTML('beforeend', '<div role="dialog"><button id="close">Close popup</button></div>');
       doc.querySelector('#close').onclick = () => { closed = true; doc.querySelector('[role=dialog]').remove(); doc.body.insertAdjacentHTML('beforeend', '<p>Popup handled</p>'); };
@@ -80,7 +80,7 @@ test('popup appearing during model request invalidates decision and is handled f
 
 test('DOM settling waits for a delayed popup and stops promptly on abort', async () => {
   const doc = page('<button>Open</button>');
-  const runner = new Runner({ document: doc, store, debug: false });
+  const runner = new Runner({ planning: false, document: doc, store, debug: false });
   runner.controller = new AbortController();
   let settled = false;
   const waiting = runner.delay(100).then(() => { settled = true; });

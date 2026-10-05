@@ -30,7 +30,7 @@ export function mount(options = {}) {
     <label id="openaiKeyLabel">Klucz OpenAI (Luna)<input id="openaiKey" type="password" autocomplete="off" placeholder="OPENAI_API_KEY lub klucz tutaj"></label>
     <label>Tryb<select id="mode"><option value="manual">Manualny · potwierdzaj klikanie</option><option value="yolo" selected>YOLO · działaj automatycznie</option></select></label>
     <details><summary>Warunek sukcesu i limity</summary><label>Sukces<select id="successType"><option value="">Ocena JEV (dwa potwierdzenia)</option><option value="text">Widoczny tekst zawiera</option><option value="url">Adres URL zawiera</option><option value="selector">Widoczny selektor CSS</option></select></label><input id="successValue" aria-label="Wartość warunku sukcesu"><div class="row"><label>Kroki<input id="steps" type="number" min="1" max="500" value="40"></label><label>Minuty<input id="minutes" type="number" min="1" max="60" value="5"></label></div></details>
-    <label>Minimalna pewność decyzji (%)<input id="confidence" type="number" min="0" max="100" step="1" value="20"></label>
+    <label>Próg decyzji i ukończenia celu (%)<input id="confidence" type="number" min="0" max="100" step="1" value="20"></label>
     <p>Poniżej progu: manualny pyta o zgodę na akcję, YOLO zatrzymuje sesję. Niższy próg dopuszcza mniej pewne decyzje. Zmiana dotyczy następnego Start.</p>
     <p>Do TypeSafe trafia tekst strony i opisy elementów. Manualny automatycznie zmienia checkboxy i odpowiedzi radiowe powyżej progu. YOLO również klika i nawiguje.</p>
     <div class="row"><button id="logs" class="secondary">Wybierz folder logów</button></div><small id="logStatus">Zapis logów wyłączony. Start nadpisuje logi poprzedniej sesji.</small>

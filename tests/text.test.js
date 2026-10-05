@@ -18,7 +18,7 @@ const store = { async save() {}, async clear() {} };
 test('console diagnostics identify HTTP requests and redact the API key', async () => {
   const document = setup();
   const records = [];
-  const runner = new Runner({ document, openaiApiKey: 'openai-key', store, apiKey: 'secret-console-key', console: { info: (...args) => records.push(args) }, transport: async (body, context) => {
+  const runner = new Runner({ planning: false, document, openaiApiKey: 'openai-key', store, apiKey: 'secret-console-key', console: { info: (...args) => records.push(args) }, transport: async (body, context) => {
     context.onHttp({ status: 200, response: context.apiKey, requestId: 'trace-123' });
     return body.model === TEXT_MODEL ? completion('bluza') : decision(body.state.stage === 'component' ? 'g0' : 'a0');
   } });
@@ -50,7 +50,7 @@ test('JEV delegates fill to Luna, then chooses Search; logs and manual approvals
   input.addEventListener('input', () => events++);
   input.addEventListener('change', () => events++);
   document.querySelector('button').onclick = () => { assert.equal(input.value, 'bluza'); document.querySelector('#result').textContent = 'Wyniki'; };
-  const runner = new Runner({ document, openaiApiKey: 'openai-key', store, apiKey: 'same-key', logger: { async reset() {}, async write(name, data) { files.set(name, structuredClone(data)); } }, confirm: async action => { approvals.push(action); return true; }, transport: async (body, context) => {
+  const runner = new Runner({ planning: false, document, openaiApiKey: 'openai-key', store, apiKey: 'same-key', logger: { async reset() {}, async write(name, data) { files.set(name, structuredClone(data)); } }, confirm: async action => { approvals.push(action); return true; }, transport: async (body, context) => {
     assert.equal(context.apiKey, body.model === TEXT_MODEL ? 'openai-key' : 'same-key');
     requests.push(body);
     if (body.model === TEXT_MODEL) { assert.match(body.messages[1].content, /dodaj bluzę/); return completion('bluza'); }
@@ -77,7 +77,7 @@ test('text parser rejects refusal, malformed, truncated and oversized output', (
 test('missing OpenAI key stops before transport and never reuses the TypeSafe key', async () => {
   const document = setup();
   let called = false;
-  const runner = new Runner({ document, store, apiKey: 'typesafe-only', debug: false, transport: async body => {
+  const runner = new Runner({ planning: false, document, store, apiKey: 'typesafe-only', debug: false, transport: async body => {
     if (body.model === TEXT_MODEL) { called = true; throw new Error('Should not send'); }
     return decision(body.state.stage === 'component' ? 'g0' : 'a0');
   } });
@@ -103,7 +103,7 @@ test('Stop interrupts Luna and leaves the input untouched', async () => {
   const document = setup();
   let entered;
   const waiting = new Promise(resolve => { entered = resolve; });
-  const runner = new Runner({ document, openaiApiKey: 'openai-key', store, transport: body => {
+  const runner = new Runner({ planning: false, document, openaiApiKey: 'openai-key', store, transport: body => {
     if (body.model === TEXT_MODEL) { entered(); return new Promise(() => {}); }
     return Promise.resolve(decision(body.state.stage === 'component' ? 'g0' : 'a0'));
   } });
@@ -116,7 +116,7 @@ test('Stop interrupts Luna and leaves the input untouched', async () => {
 
 test('a rejected generated value never changes the input', async () => {
   const document = setup();
-  const runner = new Runner({ document, openaiApiKey: 'openai-key', store, confirm: async () => false, transport: async body => body.model === TEXT_MODEL ? completion('bluza') : decision(body.state.stage === 'component' ? 'g0' : 'a0') });
+  const runner = new Runner({ planning: false, document, openaiApiKey: 'openai-key', store, confirm: async () => false, transport: async body => body.model === TEXT_MODEL ? completion('bluza') : decision(body.state.stage === 'component' ? 'g0' : 'a0') });
   await runner.start({ goal: 'bluza', mode: 'manual' });
   assert.equal(document.querySelector('input').value, '');
 });
@@ -135,7 +135,7 @@ test('GM transport routes Luna to OpenAI chat completions using the same authori
 test('text generated for a changed field is discarded before execution', async () => {
   const document = setup();
   let calls = 0;
-  const runner = new Runner({ document, openaiApiKey: 'openai-key', store, transport: async body => {
+  const runner = new Runner({ planning: false, document, openaiApiKey: 'openai-key', store, transport: async body => {
     if (body.model === TEXT_MODEL) {
       document.querySelector('input').placeholder = `changed-${++calls}`;
       return completion('bluza');

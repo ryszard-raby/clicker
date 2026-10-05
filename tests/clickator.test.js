@@ -27,7 +27,7 @@ const config = { goal: 'Wypełnij quiz', settleMs: 100, mode: 'manual', confiden
 // Existing action-level scenarios automatically select their first component.
 class Runner extends ActualRunner {
   constructor(options) {
-    super({ ...options, transport: async (body, context) => {
+    super({ planning: false, ...options, transport: async (body, context) => {
       if (body.state.stage === 'component' && body.state.page.components.some(group => group.actionCount)) {
         return answer(body.state.page.components.find(group => group.actionCount).id);
       }
@@ -88,7 +88,7 @@ test('manual mode checks answers but requires consent before submit; determinist
   let approvals = 0;
   doc.querySelector('button').onclick = () => { doc.querySelector('#result').textContent = 'Ukończono'; };
   const status = [];
-  const runner = new ActualRunner({ document: doc, store: memory(), confirm: async () => { approvals++; return true; }, transport: async body => answer(body.state.stage === 'component' ? (doc.querySelector('input').checked ? 'g1' : 'g0') : (doc.querySelector('input').checked ? 'a1' : 'a0')), onStatus: s => status.push(s) });
+  const runner = new ActualRunner({ planning: false, document: doc, store: memory(), confirm: async () => { approvals++; return true; }, transport: async body => answer(body.state.stage === 'component' ? (doc.querySelector('input').checked ? 'g1' : 'g0') : (doc.querySelector('input').checked ? 'a1' : 'a0')), onStatus: s => status.push(s) });
   await runner.start({ ...config, success: { type: 'text', value: 'Ukończono' } });
   assert.equal(approvals, 1);
   assert.equal(runner.state.steps, 2);
@@ -99,7 +99,7 @@ test('denied manual action never clicks', async () => {
   const doc = page('<button>Pay</button>').window.document;
   let clicks = 0;
   doc.querySelector('button').onclick = () => clicks++;
-  const runner = new Runner({ document: doc, store: memory(), confirm: async () => false, transport: async () => answer('a0') });
+  const runner = new Runner({ planning: false, document: doc, store: memory(), confirm: async () => false, transport: async () => answer('a0') });
   await runner.start(config);
   assert.equal(clicks, 0);
 });
@@ -109,7 +109,7 @@ test('YOLO skips consent and stops when actions make no progress', async () => {
   let clicks = 0;
   doc.querySelector('button').onclick = () => clicks++;
   const status = [];
-  const runner = new Runner({ document: doc, store: memory(), confirm: async () => { throw new Error('Should not ask'); }, transport: async () => answer('a0'), onStatus: s => status.push(s) });
+  const runner = new Runner({ planning: false, document: doc, store: memory(), confirm: async () => { throw new Error('Should not ask'); }, transport: async () => answer('a0'), onStatus: s => status.push(s) });
   await runner.start({ ...config, mode: 'yolo' });
   assert.equal(clicks, 2);
   assert.match(status.at(-1), /Brak widocznego postępu/);
@@ -119,7 +119,7 @@ test('model completion requires two high probability observations; custom rule o
   const doc = page('<p>Wynik</p>').window.document;
   let calls = 0;
   const statuses = [];
-  const runner = new Runner({ document: doc, store: memory(), transport: async () => { calls++; return answer('done', 0.99); }, onStatus: s => statuses.push(s) });
+  const runner = new Runner({ planning: false, document: doc, store: memory(), transport: async () => { calls++; return answer('done', 0.99); }, onStatus: s => statuses.push(s) });
   await runner.start(config);
   assert.equal(calls, 2);
   assert.match(statuses.at(-1), /dwukrotnie/);
@@ -129,7 +129,7 @@ test('model completion requires two high probability observations; custom rule o
 
 test('Stop cancels an in-flight transport even when transport ignores abort', async () => {
   const doc = page('<button>Go</button>').window.document;
-  const runner = new Runner({ document: doc, store: memory(), transport: () => new Promise(() => {}) });
+  const runner = new Runner({ planning: false, document: doc, store: memory(), transport: () => new Promise(() => {}) });
   const run = runner.start(config);
   await new Promise(resolve => setTimeout(resolve, 10));
   await runner.stop();
@@ -143,7 +143,7 @@ test('stale DOM response is discarded before clicking', async () => {
   let clicks = 0;
   let calls = 0;
   doc.querySelector('button').onclick = () => clicks++;
-  const runner = new Runner({ document: doc, store: memory(), transport: async () => { calls++; doc.querySelector('button').textContent = `Changed ${calls}`; return answer('a0'); } });
+  const runner = new Runner({ planning: false, document: doc, store: memory(), transport: async () => { calls++; doc.querySelector('button').textContent = `Changed ${calls}`; return answer('a0'); } });
   await runner.start({ ...config, mode: 'yolo' });
   assert.equal(calls, 5);
   assert.equal(clicks, 0);
@@ -154,7 +154,7 @@ test('checkpoint restores step budget across page loads', async () => {
   const store = memory();
   await store.save({ config: { ...config, maxSteps: 2 }, active: true, steps: 2, startedAt: Date.now(), history: [], seen: [] });
   let called = false;
-  const runner = new Runner({ document: doc, store, transport: async () => { called = true; return answer('a0'); } });
+  const runner = new Runner({ planning: false, document: doc, store, transport: async () => { called = true; return answer('a0'); } });
   await runner.resume();
   assert.equal(called, false);
   assert.equal(await store.load(), null);
@@ -164,7 +164,7 @@ test('built artifact exposes API and mounts panel without a module loader', asyn
   const dom = page('<p>Demo</p>');
   dom.window.eval(await readFile(new URL('../dist/clickator.js', import.meta.url), 'utf8'));
   assert.equal(typeof dom.window.Clickator.create, 'function');
-  dom.window.Clickator.mount({ store: memory() });
+  dom.window.Clickator.mount({ planning: false, store: memory() });
   assert.ok(dom.window.document.querySelector('[data-clickator-root]'));
 });
 
@@ -172,7 +172,7 @@ test('low confidence stops before any click', async () => {
   const doc = page('<button>Go</button>').window.document;
   let clicks = 0;
   doc.querySelector('button').onclick = () => clicks++;
-  const runner = new Runner({ document: doc, store: memory(), transport: async () => answer('a0', 0, 0.2) });
+  const runner = new Runner({ planning: false, document: doc, store: memory(), transport: async () => answer('a0', 0, 0.2) });
   await runner.start({ ...config, mode: 'yolo' });
   assert.equal(clicks, 0);
 });
@@ -181,7 +181,7 @@ test('Stop also cancels an unanswered consent request', async () => {
   const doc = page('<button>Go</button>').window.document;
   let asked;
   const waiting = new Promise(resolve => { asked = resolve; });
-  const runner = new Runner({ document: doc, store: memory(), transport: async () => answer('a0'), confirm: () => { asked(); return new Promise(() => {}); } });
+  const runner = new Runner({ planning: false, document: doc, store: memory(), transport: async () => answer('a0'), confirm: () => { asked(); return new Promise(() => {}); } });
   const run = runner.start(config);
   await waiting;
   await runner.stop();
@@ -215,7 +215,7 @@ test('GM tab store serializes a checkpoint followed by Stop and preserves unrela
 test('hidden selector is not accepted as success', async () => {
   const doc = page('<p id="success" style="visibility:hidden">Done</p>').window.document;
   let calls = 0;
-  const runner = new Runner({ document: doc, store: memory(), transport: async () => { calls++; return answer('blocked'); } });
+  const runner = new Runner({ planning: false, document: doc, store: memory(), transport: async () => { calls++; return answer('blocked'); } });
   await runner.start({ ...config, success: { type: 'selector', value: '#success' } });
   assert.equal(calls, 1);
 });
@@ -224,7 +224,7 @@ test('manual asks before uncertain checkbox actions and obeys approval or reject
   for (const allowed of [true, false]) {
     const doc = page('<fieldset><legend>Włączyć filtr?</legend><label><input type="checkbox">Tak</label></fieldset>').window.document;
     let approvals = 0;
-    const runner = new Runner({ document: doc, store: memory(), transport: async () => answer('a0', 0, 0.6), confirm: async action => {
+    const runner = new Runner({ planning: false, document: doc, store: memory(), transport: async () => answer('a0', 0, 0.6), confirm: async action => {
       approvals++;
       assert.equal(doc.querySelector('input').checked, false);
       assert.equal(action.confidence, 0.6);
@@ -240,7 +240,7 @@ test('manual asks before uncertain checkbox actions and obeys approval or reject
 
 test('YOLO accepts confidence equal to the configured threshold', async () => {
   const doc = page('<label><input type="checkbox">Tak</label>').window.document;
-  const runner = new Runner({ document: doc, store: memory(), transport: async () => answer('a0', 0, 0.6), confirm: async () => { throw new Error('Unexpected approval'); } });
+  const runner = new Runner({ planning: false, document: doc, store: memory(), transport: async () => answer('a0', 0, 0.6), confirm: async () => { throw new Error('Unexpected approval'); } });
   await runner.start({ ...config, mode: 'yolo', confidence: 0.6, maxSteps: 1 });
   assert.equal(doc.querySelector('input').checked, true);
 });
@@ -249,7 +249,7 @@ test('uncertain done does not bypass success verification through manual approva
   const doc = page('<p>Quiz</p>').window.document;
   let approvals = 0;
   const statuses = [];
-  const runner = new Runner({ document: doc, store: memory(), transport: async () => answer('done', 1, 0.6), confirm: async () => { approvals++; return true; }, onStatus: message => statuses.push(message) });
+  const runner = new Runner({ planning: false, document: doc, store: memory(), transport: async () => answer('done', 1, 0.6), confirm: async () => { approvals++; return true; }, onStatus: message => statuses.push(message) });
   await runner.start(config);
   assert.equal(approvals, 0);
   assert.match(statuses.at(-1), /poniżej progu 70%/);
@@ -261,7 +261,7 @@ test('panel passes the selected confidence percentage into the runner', async ()
   let shadow;
   const attach = dom.window.HTMLElement.prototype.attachShadow;
   dom.window.HTMLElement.prototype.attachShadow = function (options) { shadow = attach.call(this, options); return shadow; };
-  const runner = mount({ document: dom.window.document, store: memory() });
+  const runner = mount({ planning: false, document: dom.window.document, store: memory() });
   let received;
   runner.start = async options => { received = options; };
   shadow.getElementById('goal').value = 'Test';
@@ -284,7 +284,7 @@ test('mount automatically resumes a navigated session, including one with a lost
     doc.querySelector('button').onclick = () => { clicks++; doc.querySelector('#result').textContent = 'In cart'; };
     let finished;
     const completion = new Promise(resolve => { finished = resolve; });
-    const runner = mount({ document: doc, store, transport: async body => {
+    const runner = mount({ planning: false, document: doc, store, transport: async body => {
       assert.equal(body.state.goal, 'Add Samsung S26 to cart');
       assert.equal(body.state.history[0].action.label, 'Samsung S26');
       return answer(body.state.stage === 'component' ? 'g0' : 'a0');
@@ -306,7 +306,7 @@ test('automatic resume can be disabled and never resumes a stopped session', asy
     const store = memory();
     await store.save({ active, config: { goal: 'Test' } });
     let calls = 0;
-    const runner = mount({ document: dom.window.document, store, ...(active ? { autoResume: false } : {}), transport: async () => { calls++; return answer('blocked'); } });
+    const runner = mount({ planning: false, document: dom.window.document, store, ...(active ? { autoResume: false } : {}), transport: async () => { calls++; return answer('blocked'); } });
     await new Promise(resolve => setTimeout(resolve, 20));
     assert.equal(calls, 0);
     assert.equal(runner.running, false);

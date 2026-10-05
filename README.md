@@ -146,7 +146,7 @@ Tryb **manualny** bez pytania zmienia checkboxy (także odznacza), radio i role 
 
 Domyślny tryb to YOLO, a próg pewności wynosi 20%. W panelu pole „Minimalna pewność decyzji (%)” pozwala zmienić próg — decyzja równa progowi jest akceptowana. Zmiana obowiązuje po kliknięciu Start; Wznów używa konfiguracji zapisanej sesji. W API domyślnej wartości odpowiada `runner.start({ goal: '...', confidence: 0.2 })`.
 
-Niższy próg dopuszcza mniej pewne wybory. Zamiast obniżać go dla wszystkich działań, możesz użyć trybu manualnego i zatwierdzać pojedyncze niepewne akcje. Ta zgoda nie obniża progu następnych decyzji ani nie omija sprawdzania aktualności DOM. Niepewne `done`/`blocked` nadal zatrzymuje sesję; próg oceny osiągnięcia celu `successThreshold` pozostaje osobnym ustawieniem. Wynik pewności modelu nie jest gwarancją poprawności akcji.
+Niższy próg dopuszcza mniej pewne wybory. Zamiast obniżać go dla wszystkich działań, możesz użyć trybu manualnego i zatwierdzać pojedyncze niepewne akcje. Ta zgoda nie obniża progu następnych decyzji ani nie omija sprawdzania aktualności DOM. Niepewne `done`/`blocked` nadal zatrzymuje sesję; completion uses the same confidence setting. Wynik pewności modelu nie jest gwarancją poprawności akcji.
 
 ## Zakończenie
 
@@ -158,11 +158,17 @@ Najbardziej przewidywalny jest jawny warunek `success`:
 
 Warunek sprawdzany jest przed kolejnym wywołaniem API. Jeśli go podasz, model nie może zastąpić go własnym werdyktem. Wartość musi jednoznacznie oznaczać sukces; sam napis przycisku „Zakończ” nie jest dobrym warunkiem.
 
-Bez jawnego warunku wymagane są dwie kolejne decyzje `done` z `achieved >= 0.97` i wystarczającą pewnością wyboru. Jest to heurystyczna ocena modelu, **nie dowód** poprawnego wykonania; dwa odczyty nie są niezależną weryfikacją. Komunikat panelu rozróżnia tę ocenę od spełnienia jawnego warunku.
+Bez jawnego warunku wymagane są dwie kolejne decyzje `done` z `achieved >= confidence` i wystarczającą pewnością wyboru. Jest to heurystyczna ocena modelu, **nie dowód** poprawnego wykonania; dwa odczyty nie są niezależną weryfikacją. Komunikat panelu rozróżnia tę ocenę od spełnienia jawnego warunku.
 
 Inne zakończenia nie oznaczają sukcesu: limit kroków/czasu, niska pewność, `blocked`, błąd API, dwie akcje bez zmiany obserwowanego stanu, powtarzana akcja w tym samym stanie, pięć nieaktualnych odpowiedzi z rzędu, odmowa lub Stop. Domyślne limity: 40 akcji i 5 minut; timeout żądania: 30 sekund. Błędy API nie uruchamiają automatycznych ponowień.
 
 ## Zakres MVP
+
+Planowanie jest domyślnie włączone. Po Start JEV klasyfikuje polecenie jako proste lub złożone. Proste trafia do dotychczasowej pętli wyboru komponentu i akcji. Dla złożonego Luna (`OPENAI_API_KEY`) tworzy kolejkę 1–8 samodzielnie opisanych podcelów, każdy z widocznym warunkiem ukończenia. JEV wykonuje je sekwencyjnie tym samym mechanizmem; dwa potwierdzenia `done` kończą aktualny podcel. Panel pokazuje numer i treść bieżącego zadania.
+
+Kolejka, pozycja, ukończone cele i licznik ponownych planowań zapisują się w sesji i przechodzą przez nawigację razem z dotychczasowym magazynem Tampermonkey. Decyzja JEV `blocked` uruchamia ponowne planowanie pozostałych celów (maksymalnie dwie próby na całą sesję), także gdy zadanie pierwotnie uznano za proste. Planista otrzymuje oryginalne polecenie, ukończone i pozostałe cele, krótki kontekst strony oraz ostatnie akcje. Błędy API, niska pewność i zabezpieczenia przed zapętleniem nadal zatrzymują wykonanie.
+
+Limity czasu i akcji obejmują cały proces i nie resetują się między podcelami. Jawny `success` pozostaje warunkiem sukcesu całego polecenia. Wszystkie wywołania klasyfikacji i planowania korzystają z dotychczasowych numerowanych logów request/response. `Clickator.mount({ planning: false })` lub `Clickator.create({ planning: false })` wyłącza tę warstwę. Planista używa [Structured Outputs OpenAI](https://developers.openai.com/api/docs/guides/structured-outputs); odpowiedź jest dodatkowo walidowana lokalnie. Testy używają atrap API — rzeczywiste plany zależą od odpowiedzi modeli.
 
 Dropdowny: natywne `select` oferują konkretne opcje (także zaznaczanie/odznaczanie w `multiple`). Niestandardowe kontrolki z `role=combobox` lub `aria-haspopup=listbox/menu/true` oferują otwarcie/zamknięcie, a po ponownym skanie JEV wybiera widoczną opcję `role=option` lub `menuitem*`. `aria-controls` / `aria-owns` łączy listę renderowaną poza kontrolką z jej etykietą, np. „Rozmiar”. Opcje ukryte i wyłączone są pomijane. W trybie manualnym otwarcie i wybór wymagają zgody. Dowolne dropdowny z samych divów bez ról ARIA, listy wirtualizowane i wyszukiwanie tekstowe wewnątrz comboboxa mogą wymagać adaptera konkretnej strony.
 
@@ -177,4 +183,7 @@ Dropdowny: natywne `select` oferują konkretne opcje (także zaznaczanie/odznacz
 ### Automatyczne przejście z kategorii do koszyka
 
 Wrapper Tampermonkey musi uruchamiać `Clickator.mount()` na każdej stronie zadania (`@match` obejmujący kategorię, produkt i koszyk; `@run-at document-idle`). Klucz z buildu lub `getApiKey` musi być dostępny po przeładowaniu. W trybie YOLO zadanie np. „Znajdź Samsung S26 i dodaj go do koszyka” kontynuuje się po nawigacji z tą samą historią i pozostałym budżetem kroków/czasu. Tryb manualny wznawia analizę, ale nadal wymaga potwierdzenia kliknięć. Samo dodanie do koszyka nie oznacza złożenia zamówienia.
+
+
+JEV uses the configured confidence threshold for both intermediate and final completion (two consecutive done decisions). Luna only plans tasks and generates field values. Legacy successThreshold/taskSuccessThreshold values in saved sessions are ignored.
 

@@ -63,10 +63,10 @@ export function parseDecision(data, actions, threshold = 0.2) {
 }
 
 export function validateConfig(input = {}) {
-  const config = { mode: 'yolo', maxSteps: 40, maxMinutes: 5, confidence: 0.2, successThreshold: 0.97, settleMs: 650, autocompleteMs: 1500, success: null, ...input };
+  const config = { mode: 'yolo', maxSteps: 40, maxMinutes: 5, confidence: 0.2, settleMs: 650, autocompleteMs: 1500, success: null, ...input };
   if (!config.goal?.trim()) throw new Error('Podaj cel.');
   if (!['manual', 'yolo'].includes(config.mode)) throw new Error('Nieznany tryb.');
-  for (const [key, min, max] of [['maxSteps', 1, 500], ['maxMinutes', 0.1, 60], ['confidence', 0, 1], ['successThreshold', 0.5, 1], ['settleMs', 100, 10000], ['autocompleteMs', 100, 10000]]) {
+  for (const [key, min, max] of [['maxSteps', 1, 500], ['maxMinutes', 0.1, 60], ['confidence', 0, 1], ['settleMs', 100, 10000], ['autocompleteMs', 100, 10000]]) {
     if (!Number.isFinite(config[key]) || config[key] < min || config[key] > max) throw new Error(`Nieprawidłowa opcja: ${key}`);
   }
   if (!Number.isInteger(config.maxSteps)) throw new Error('Limit kroków musi być liczbą całkowitą.');

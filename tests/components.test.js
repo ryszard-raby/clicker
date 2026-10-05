@@ -42,7 +42,7 @@ test('filter then Apply reselects components using current selection and history
   const document = doc('<form><fieldset><legend>Color</legend><label><input type="checkbox">Red</label></fieldset><button type="button">Filter</button></form><p id="result"></p>');
   document.querySelector('button').onclick = () => { document.querySelector('#result').textContent = 'Filtered'; };
   const requests = [];
-  const runner = new Runner({ document, store: store(), transport: async body => {
+  const runner = new Runner({ planning: false, document, store: store(), transport: async body => {
     requests.push(body);
     const selected = document.querySelector('input').checked;
     if (body.state.stage === 'component') {
@@ -83,7 +83,7 @@ test('submit input receives current filter selections and submits with the origi
     submissions++;
     document.querySelector('#result').textContent = 'Applied';
   });
-  const runner = new Runner({ document, store: store(), onStatus: message => statuses.push(message), transport: async body => {
+  const runner = new Runner({ planning: false, document, store: store(), onStatus: message => statuses.push(message), transport: async body => {
     const checked = document.querySelector('[type="checkbox"]').checked;
     if (body.state.stage === 'component') return answer(checked ? 'g1' : 'g0');
     if (checked) {
@@ -106,7 +106,7 @@ test('action from a different component is rejected', async () => {
   const document = doc('<fieldset><button>One</button></fieldset><fieldset><button>Two</button></fieldset>');
   let clicks = 0;
   document.querySelectorAll('button').forEach(button => { button.onclick = () => clicks++; });
-  const runner = new Runner({ document, store: store(), transport: async body => answer(body.state.stage === 'component' ? 'g0' : 'a1') });
+  const runner = new Runner({ planning: false, document, store: store(), transport: async body => answer(body.state.stage === 'component' ? 'g0' : 'a1') });
   await runner.start({ goal: 'Test', mode: 'yolo' });
   assert.equal(clicks, 0);
 });
@@ -114,7 +114,7 @@ test('action from a different component is rejected', async () => {
 test('uncertain component selection requires consent even for a confident checkbox action', async () => {
   const document = doc('<label><input type="checkbox">Red</label>');
   let approvals = 0;
-  const runner = new Runner({ document, store: store(), transport: async body => answer(body.state.stage === 'component' ? 'g0' : 'a0', body.state.stage === 'component' ? 0.4 : 1), confirm: async action => { approvals++; assert.equal(action.confidence, 0.4); return false; } });
+  const runner = new Runner({ planning: false, document, store: store(), transport: async body => answer(body.state.stage === 'component' ? 'g0' : 'a0', body.state.stage === 'component' ? 0.4 : 1), confirm: async action => { approvals++; assert.equal(action.confidence, 0.4); return false; } });
   await runner.start({ goal: 'Test', mode: 'manual', confidence: 0.7 });
   assert.equal(approvals, 1);
   assert.equal(document.querySelector('input').checked, false);
@@ -123,7 +123,7 @@ test('uncertain component selection requires consent even for a confident checkb
 test('a DOM change during component selection discards the plan before asking for an action', async () => {
   const document = doc('<button>Original</button>');
   let calls = 0;
-  const runner = new Runner({ document, store: store(), transport: async body => {
+  const runner = new Runner({ planning: false, document, store: store(), transport: async body => {
     assert.equal(body.state.stage, 'component');
     document.querySelector('button').textContent = `Changed ${++calls}`;
     return answer('g0');

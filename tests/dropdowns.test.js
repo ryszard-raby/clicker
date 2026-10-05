@@ -30,7 +30,7 @@ test('opens custom dropdown then selects a portalled option with owner context',
   const popup = document.querySelector('[role=listbox]');
   trigger.onclick = () => { trigger.setAttribute('aria-expanded', 'true'); popup.hidden = false; };
   document.querySelectorAll('[role=option]')[1].onclick = event => { event.target.setAttribute('aria-selected', 'true'); popup.hidden = true; trigger.setAttribute('aria-expanded', 'false'); trigger.textContent = 'M'; document.querySelector('#result').textContent = 'Wybrano M'; };
-  const runner = new Runner({ document, debug: false, store: { async save() {}, async clear() {} }, transport: async body => {
+  const runner = new Runner({ planning: false, document, debug: false, store: { async save() {}, async clear() {} }, transport: async body => {
     if (body.state.stage === 'component') {
       const group = body.state.page.components.find(group => group.kinds.includes(popup.hidden ? 'dropdown' : 'option'));
       return answer(group.id);

@@ -1,5 +1,6 @@
 import { validateConfig, requestBody, componentSummaries, parseDecision, fetchTransport, fingerprint, localSuccess, textRequest, parseText, endpointFor, payloadFor, TEXT_MODEL } from './core.js';
 import { scan, execute } from './dom.js';
+import { classificationRequest, parseComplexity, planRequest, parsePlan, validateTasks } from './planning.js';
 
 const STORE_KEY = 'clickator.session.v1';
 export function sessionStore(doc) {
@@ -23,10 +24,14 @@ export class Runner {
     this.onStatus = options.onStatus || (() => {});
     this.confirm = options.confirm || (async action => this.doc.defaultView.confirm(`Clickator: ${action.label}\n${action.kind === 'fill' ? 'Wpisz: ' + action.value : action.optionLabel || action.href || action.kind}\n${action.context || ''}\nPewność: ${Math.round(action.confidence * 100)}% (próg ${Math.round(action.threshold * 100)}%)\nZezwolić na akcję?`));
     this.running = false;
+    this.planning = options.planning !== false;
     this.pending = null;
     this.state = null;
   }
-  emit(message) { this.onStatus(message, this.state); }
+  emit(message) {
+    const plan = this.state?.plan;
+    this.onStatus(plan && plan.index < plan.tasks.length ? `[${plan.index + 1}/${plan.tasks.length}] ${plan.tasks[plan.index].goal} · ${message}` : message, this.state);
+  }
   async stop(reason = 'Zatrzymano przez użytkownika.') {
     this.running = false;
     this.controller?.abort();
@@ -45,6 +50,10 @@ export class Runner {
       state.logging = false;
     }
     if (!Array.isArray(state.history) || !Array.isArray(state.seen) || !Number.isInteger(state.steps) || !Number.isFinite(state.startedAt)) throw new Error('Nieprawidłowa zapisana sesja.');
+    if (state.plan) {
+      validateTasks(state.plan.tasks);
+      if (!Number.isInteger(state.plan.index) || state.plan.index < 0 || state.plan.index > state.plan.tasks.length || !Array.isArray(state.plan.completed) || !Number.isInteger(state.plan.replans) || state.plan.replans < 0 || state.plan.replans > 2) throw new Error('Niepoprawna zapisana kolejka.');
+    }
     this.state = state;
     return this.run();
   }
@@ -53,8 +62,52 @@ export class Runner {
     this.state = { config: validateConfig(config), active: true, steps: 0, startedAt: Date.now(), history: [], seen: [], unchanged: 0, successVotes: 0, requestId: 0, logging: !!this.logger };
     return this.run();
   }
+  currentGoal() {
+    const task = this.state.plan?.tasks[this.state.plan.index];
+    return task ? `${task.goal}\nVisible completion condition: ${task.success}` : this.state.config.goal;
+  }
+  async checkpointPlan() {
+    if (!this.running) return;
+    await this.store.save(this.state);
+    if (!this.running) await this.store.clear();
+  }
+  async makePlan(page, reason = null) {
+    const previous = this.state.plan;
+    if (reason && (previous?.replans || 0) >= 2) {
+      await this.stop('Osiągnięto limit dwóch prób ponownego planowania.');
+      return false;
+    }
+    const data = await this.send(planRequest(this.state, page, reason), reason ? 'ponowne planowanie' : 'planowanie');
+    if (!this.running) return false;
+    const tasks = parsePlan(data);
+    this.state.plan = { tasks, index: 0, completed: previous?.completed || [], replans: (previous?.replans || 0) + (reason ? 1 : 0) };
+    this.state.classification = 'complex';
+    this.state.successVotes = 0;
+    this.state.unconfirmedDone = 0;
+    this.state.unchanged = 0;
+    await this.checkpointPlan();
+    this.emit('Plan: ' + tasks.map((task, i) => `${i + 1}. ${task.goal}`).join(' → '));
+    return this.running;
+  }
+  async preparePlan(page) {
+    if (!this.planning || this.state.plan || this.state.classification === 'simple') return;
+    if (!this.state.classification) {
+      const result = await this.send(classificationRequest(this.state.config.goal, page), 'ocena złożoności');
+      if (!this.running) return;
+      this.state.classification = parseComplexity(result, this.state.config.confidence);
+      await this.checkpointPlan();
+    }
+    if (this.running && this.state.classification === 'complex') await this.makePlan(page);
+  }
   async decide(snapshot, componentId = null) {
-    const body = requestBody(this.state.config.goal, snapshot, this.state.history, componentId);
+    const body = requestBody(this.currentGoal(), snapshot, this.state.history, componentId);
+    const task = this.state.plan?.tasks[this.state.plan.index];
+    if (task) {
+      body.state.currentTask = task;
+      const scope = ' This request concerns ONLY the currentTask, not the entire multi-step purchase/process. Judge achieved against currentTask.success. Search is complete when matching results are visible; opening, cart and checkout are separate later goals unless explicitly requested in currentTask. Do not require later milestones to confirm this task. Still require visible evidence for its completion.';
+      body.questions.next.instructions += scope;
+      body.questions.achieved.instructions += scope;
+    }
     const stage = componentId === null ? 'wybór komponentu' : 'wybór akcji';
     return this.send(body, stage);
   }
@@ -127,7 +180,9 @@ export class Runner {
     const deadlineTimer = setTimeout(() => { void this.stop('Osiągnięto limit czasu.'); }, Math.max(0, deadline - Date.now()));
     try {
       if (this.logger && !state.requestId) await this.logger.reset();
+      await this.preparePlan(scan(this.doc).publicState);
       while (this.running) {
+        if (state.plan && state.plan.index === state.plan.tasks.length) return await this.stop('Wszystkie zadania zostały ukończone (ocena modelu).');
         if (Date.now() >= deadline) return await this.stop('Osiągnięto limit czasu.');
         const snapshot = scan(this.doc);
         const page = snapshot.publicState;
@@ -169,12 +224,42 @@ export class Runner {
         state.stale = 0;
         const needsConfidenceApproval = decision.uncertain && config.mode === 'manual' && fresh.refs.has(decision.choice);
         if (decision.uncertain && !needsConfidenceApproval) return await this.stop(`Wstrzymano: pewność ${Math.round(decision.confidence * 100)}% poniżej progu ${Math.round(config.confidence * 100)}%. Zmień próg w panelu lub użyj trybu manualnego, aby zatwierdzać niepewne akcje.`);
-        if (decision.choice === 'blocked') return await this.stop('JEV nie znalazł kolejnej akcji. Potrzebna interwencja użytkownika.');
+        if (decision.choice === 'blocked') {
+          if (this.planning) {
+            if (await this.makePlan(page, 'JEV selected blocked: cannot continue the current goal with available actions.')) continue;
+            return;
+          }
+          return await this.stop('JEV nie znalazł kolejnej akcji. Potrzebna interwencja użytkownika.');
+        }
         if (decision.choice === 'done') {
-          if (config.success) return await this.stop('JEV sugeruje koniec, ale podany warunek sukcesu nie został spełniony.');
-          if (decision.achieved < config.successThreshold) return await this.stop('Nie można potwierdzić osiągnięcia celu.');
+          if (config.success && (!state.plan || state.plan.index === state.plan.tasks.length - 1)) return await this.stop('JEV sugeruje koniec, ale podany warunek sukcesu nie został spełniony.');
+          const completionThreshold = config.confidence;
+          if (decision.achieved < completionThreshold) {
+            if (!state.plan) return await this.stop('Nie można potwierdzić osiągnięcia celu.');
+            state.successVotes = 0;
+            state.unconfirmedDone = (state.unconfirmedDone || 0) + 1;
+            if (state.unconfirmedDone >= 2) {
+              return await this.stop(`JEV nie potwierdził ukończenia: ocena ${Math.round(decision.achieved * 100)}%, wymagane ${Math.round(completionThreshold * 100)}%.`);
+            }
+            this.emit(`Ponownie sprawdzam ukończenie podcelu: ocena ${Math.round(decision.achieved * 100)}%, wymagane ${Math.round(completionThreshold * 100)}%.`);
+            await this.checkpointPlan();
+            await this.delay();
+            continue;
+          }
+          state.unconfirmedDone = 0;
           state.successVotes++;
-          if (state.successVotes >= 2) return await this.stop('JEV dwukrotnie ocenił cel jako osiągnięty (ocena modelu).');
+          if (state.successVotes >= 2) {
+            if (state.plan) {
+              state.plan.completed.push(state.plan.tasks[state.plan.index]);
+              state.plan.index++;
+              state.successVotes = 0;
+              state.unchanged = 0;
+              await this.checkpointPlan();
+              if (!this.running) return;
+              if (state.plan.index < state.plan.tasks.length) continue;
+            }
+            return await this.stop('JEV dwukrotnie ocenił cel jako osiągnięty (ocena modelu).');
+          }
           this.emit('Weryfikuję zakończenie drugim odczytem strony…');
           await this.delay();
           continue;
@@ -183,7 +268,7 @@ export class Runner {
         const ref = fresh.refs.get(decision.choice);
         const action = ref.action;
         if (action.kind === 'fill') {
-          const generated = await this.send(textRequest(config.goal, page, action), 'generowanie wartości pola');
+          const generated = await this.send(textRequest(this.currentGoal(), page, action), 'generowanie wartości pola');
           if (!this.running) return;
           const check = scan(this.doc);
           if (fingerprint(check.publicState) !== before || check.refs.get(action.id)?.el !== ref.el) {
